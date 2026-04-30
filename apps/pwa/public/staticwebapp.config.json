@@ -1,0 +1,9 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/sw.js", "/workbox-*.js", "/manifest.webmanifest", "/peerpoint-icon.png", "/peerpoint-logo.png"]
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
+  }
+}

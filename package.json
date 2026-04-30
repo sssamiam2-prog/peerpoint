@@ -1,0 +1,9 @@
+{
+  "name": "slco-peer-support-monorepo",
+  "private": true,
+  "scripts": {
+    "spfx:start": "npm --prefix peer-support-app run start",
+    "spfx:build": "npm --prefix peer-support-app run build"
+  }
+}
+

@@ -1,0 +1,27 @@
+.body {
+  font-size: 15px;
+  line-height: 1.65;
+  color: #3d524a;
+  max-width: 52em;
+}
+
+.lead {
+  margin: 0 0 1rem;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.h3 {
+  margin: 1.35rem 0 0.5rem;
+  font-size: 15px;
+  font-weight: 700;
+  color: #2d3f37;
+}
+
+.h3:first-of-type {
+  margin-top: 0.5rem;
+}
+
+.body p {
+  margin: 0 0 0.85rem;
+}

@@ -1,0 +1,22 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "whichFolder": "subdir",
+    "solutionName": "peer-support-app",
+    "environment": "spo",
+    "packageManager": "npm",
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "useGulp": false,
+    "componentType": "webpart",
+    "template": "react",
+    "componentName": "PeerSupport",
+    "plusBeta": false,
+    "isCreatingSolution": true,
+    "nodeVersion": "22.22.0",
+    "sdksVersions": {},
+    "version": "1.22.2",
+    "libraryName": "peer-support-app",
+    "libraryId": "d898c960-af45-4663-8dd0-55231cb6217e",
+    "solutionShortDescription": "peer-support-app description"
+  }
+}

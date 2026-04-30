@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+  "solution": {
+    "name": "PEERPoint-client-side-solution",
+    "id": "d898c960-af45-4663-8dd0-55231cb6217e",
+    "version": "1.0.0.0",
+    "includeClientSideAssets": true,
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "developer": {
+      "name": "",
+      "websiteUrl": "",
+      "privacyUrl": "",
+      "termsOfUseUrl": "",
+      "mpnId": "Undefined-1.22.2"
+    },
+    "metadata": {
+      "shortDescription": {
+        "default": "PEERPoint — Salt Lake County Sheriff’s Office Peer Support"
+      },
+      "longDescription": {
+        "default": "Request help, self-help resources, and peer support workflows for Salt Lake County Sheriff’s Office."
+      },
+      "screenshotPaths": [],
+      "videoUrl": "",
+      "categories": []
+    },
+    "features": [
+      {
+        "title": "peer-support-app Feature",
+        "description": "The feature that activates elements of the peer-support-app solution.",
+        "id": "7429b67d-985a-4be4-8a63-7db7a1960faa",
+        "version": "1.0.0.0"
+      }
+    ]
+  },
+  "paths": {
+    "zippedPackage": "solution/peer-support-app.sppkg"
+  }
+}

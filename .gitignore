@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+lib/
+lib-dts/
+lib-commonjs/
+lib-esm/
+release/
+solution/
+temp/
+jest-output/
+.heft/
+
+# SharePoint package
+*.sppkg
+
+# Logs and coverage
+logs/
+*.log
+npm-debug.log*
+coverage/
+
+# Local env (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.ntvs_analysis.dat
+.vs/
+*.user
+
+# Generated (SPFx)
+*.resx.ts
+*.scss.ts
