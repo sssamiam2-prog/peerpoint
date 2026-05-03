@@ -1,12 +1,10 @@
-# Deploy PEERPoint PWA to Cloudflare Pages from GitHub (recommended preview path).
+# Primary PWA pipeline: build on GitHub Actions, deploy static dist to Cloudflare Pages.
 #
-# Prerequisites:
-# 1. Mirror or host this repo on GitHub (Azure Repos can stay canonical; push --mirror or add github remote).
-# 2. Cloudflare Dashboard → Create Pages project (Workers & Pages → Create → project name e.g. peer-support-pwa).
-# 3. GitHub repo → Settings → Secrets and variables → Actions:
-#    - CLOUDFLARE_API_TOKEN  (API Token with "Cloudflare Pages — Edit")
-#    - CLOUDFLARE_ACCOUNT_ID (Workers overview → right column)
-# 4. If your Cloudflare Pages project name is not "peer-support-pwa", change --project-name below (and wrangler.toml / package.json deploy:pages).
+# Secrets (repo → Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — API token with "Cloudflare Pages — Edit"
+#   CLOUDFLARE_ACCOUNT_ID  — from Cloudflare Workers & Pages overview
+#
+# Pages project name defaults to peer-support-pwa; change --project-name below and wrangler.toml / package.json deploy:pages if needed.
 
 name: Deploy PWA to Cloudflare Pages
 

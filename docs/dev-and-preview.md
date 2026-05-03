@@ -1,52 +1,32 @@
-# Develop locally, keep Azure Repos, preview on Cloudflare Pages
+# PEERPoint PWA: GitHub Actions + Cloudflare Pages
 
-Use **Azure DevOps Git** for everyday commits, and optionally **GitHub + Cloudflare Pages** for HTTPS preview URLs without Azure Pipelines parallelism.
+**PWA build and hosting** use **GitHub Actions** (CI) and **Cloudflare Pages** (static hosting). Azure Static Web Apps and Azure Pipelines definitions were removed from this repo in favor of that path.
 
-## Day-to-day development (no cloud deploy)
+The **SPFx web part** still packages and deploys to **SharePoint** separately (`peer-support-app`); that flow is unchanged.
 
-1. Clone from Azure Repos (or open your existing folder).
-2. PWA:
+## Day-to-day development (local)
+
+1. PWA:
    ```bash
    cd apps/pwa
    npm install
    npm run dev
    ```
-3. SPFx web part (when needed):
+2. SPFx web part (when needed):
    ```bash
    cd peer-support-app
    npm install
    gulp serve
    ```
 
-Commit and push to `main` (or your branch) on Azure Repos as usual.
+## Primary: deploy PWA with GitHub + Cloudflare
 
-## Optional: GitHub mirror + Cloudflare Pages
-
-### Why
-
-- **Cloudflare Pages** serves the static `dist/` build with preview URLs per branch.
-- **GitHub Actions** in this repo can build and run `wrangler pages deploy` (see `.github/workflows/cloudflare-pages.yml`).
-- Your **canonical** repo can stay on Azure DevOps; GitHub is only a mirror for Pages if you want.
-
-### One-time: GitHub repository
-
-1. Create an empty repo on GitHub (same org or personal), e.g. `peer-support-app`.
-2. Add a remote and push (from repo root):
-
-   ```bash
-   git remote add github https://github.com/<ORG>/<REPO>.git
-   git push -u github main
-   ```
-
-   To refresh the mirror later: `git push github main`.
-
-   (Alternatively use **Azure DevOps → Project settings → Repositories → Mirroring** to push to GitHub automatically.)
+Workflow: [`.github/workflows/cloudflare-pages.yml`](../.github/workflows/cloudflare-pages.yml) — on push to `main` (paths under `apps/pwa/`, `packages/shared/`, or the workflow file), or **workflow_dispatch**, it runs `npm ci` + `npm run build` in `apps/pwa`, then `wrangler pages deploy`.
 
 ### One-time: Cloudflare
 
-1. Sign in to [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** *or* create an empty project first for CLI/GitHub Actions.
-2. Create a **Pages** project whose name matches the default in this repo: **`peer-support-pwa`** (or pick another name and change it in `.github/workflows/cloudflare-pages.yml`, `apps/pwa/wrangler.toml`, and `apps/pwa/package.json` script `deploy:pages`).
-3. Create an **API Token** with **Cloudflare Pages — Edit** (and account read if prompted). Copy **Account ID** from Workers & Pages overview.
+1. [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create** → **Pages** — create project **`peer-support-pwa`** (or change the name in the workflow, [`apps/pwa/wrangler.toml`](../apps/pwa/wrangler.toml), and [`apps/pwa/package.json`](../apps/pwa/package.json) `deploy:pages` script).
+2. Create an **API Token** with **Cloudflare Pages — Edit**. Copy **Account ID** from the Workers & Pages overview.
 
 ### One-time: GitHub Actions secrets
 
@@ -57,58 +37,48 @@ In the **GitHub** repo: **Settings → Secrets and variables → Actions**
 | `CLOUDFLARE_API_TOKEN` | API token from Cloudflare |
 | `CLOUDFLARE_ACCOUNT_ID` | Account ID from Cloudflare dashboard |
 
-If your Pages project name is not **`peer-support-pwa`**, edit `--project-name` in `.github/workflows/cloudflare-pages.yml`, `apps/pwa/wrangler.toml` (`name`), and `apps/pwa/package.json` (`deploy:pages` script) to match.
+Pushes to `main` that touch `apps/pwa/`, `packages/shared/`, or the workflow file trigger **Deploy PWA to Cloudflare Pages**. You can also run it from the **Actions** tab.
 
-Pushes to `main` that touch `apps/pwa/`, `packages/shared/`, or the workflow file trigger **Deploy PWA to Cloudflare Pages**. You can also run it manually from the **Actions** tab.
+### Git repository layout
 
-### Local deploy to Pages (no GitHub)
-
-From `apps/pwa` after a production build:
-
-```bash
-npm run build
-npx wrangler pages deploy dist --project-name=peer-support-pwa
-```
-
-Or `npm run deploy:pages` (uses the same project name; edit `package.json` if you renamed the project).
-
-### Entra ID (sign-in)
-
-Add each **preview and production** origin (e.g. `https://peer-support-pwa.pages.dev` and branch preview URLs) as a **SPA redirect URI** for the app registration used by the PWA, or users will see redirect errors after deploy.
-
-### Cloudflare “Connect Git” instead of Actions
-
-If you prefer Cloudflare to build the site (no GitHub Action):
-
-- **Root directory:** `apps/pwa`
-- **Build command:** `npm ci && npm run build` (the repo includes `apps/pwa/.npmrc` so `npm ci` resolves `vite-plugin-pwa` with Vite 8.)
-- **Build output directory:** `dist`
-
-You still need a **GitHub** (or GitLab) connection for that wizard; Azure Repos alone is not supported as a first-class Pages Git source.
-
-### Mirror repo for this project
-
-GitHub remote (push target): **https://github.com/sssamiam2-prog/peer-support-app**
-
-Code is mirrored there from Azure Repos; add `git remote add github <url>` if you clone fresh (remote name `github`).
+- **GitHub** (for Actions + Pages): **https://github.com/sssamiam2-prog/peer-support-app** — add `git remote add github <url>` if you clone without it (remote name `github`).
+- **Azure DevOps** may still be used as an extra remote for org policy (`origin`). After local commits, push to both as needed, e.g. `git push origin main` and `git push github main`.
 
 ### Push workflows to GitHub (`workflow` OAuth scope)
 
-GitHub rejects pushes that create or update `.github/workflows/*.yml` unless the credential includes the **`workflow`** scope (classic PAT or GitHub CLI).
-
-If `git push github main` fails with `workflow scope`, run:
+If `git push github main` fails when updating `.github/workflows/*.yml`, the GitHub credential needs the **`workflow`** scope:
 
 ```bash
 gh auth refresh -s workflow -h github.com
 ```
 
-Finish the browser/device login, then push again:
+Then `git push github main` again.
+
+### Local deploy to Pages (no GitHub)
+
+From `apps/pwa`:
 
 ```bash
-git push github main
+npm run deploy:pages
 ```
 
-Until those files exist on GitHub, **Actions** will not run; `gh workflow list` stays empty.
+(or `npm run build` then `npx wrangler pages deploy dist --project-name=peer-support-pwa`).
+
+### Entra ID (sign-in)
+
+Add each **preview and production** origin (e.g. `https://peer-support-pwa.pages.dev` and branch preview URLs) as **SPA redirect URIs** for the app registration used by the PWA.
+
+### Cloudflare “Connect Git” instead of Actions
+
+If you prefer Cloudflare to run the build (no GitHub Action):
+
+- **Root directory:** `apps/pwa`
+- **Build command:** `npm ci && npm run build` (`apps/pwa/.npmrc` enables `npm ci` with Vite 8 + `vite-plugin-pwa`.)
+- **Build output directory:** `dist`
+
+### `staticwebapp.config.json`
+
+[`apps/pwa/public/staticwebapp.config.json`](../apps/pwa/public/staticwebapp.config.json) is harmless on Cloudflare; it is only used if you ever deploy the same `dist` to Azure Static Web Apps again.
 
 ## SPA behavior on Pages
 

@@ -2,7 +2,7 @@
 
 Local dev: `npm install` → `npm run dev`. Production build: `npm run build` (output in `dist/`).
 
-**Git + hosted previews:** keep using Azure Repos for daily work; optionally mirror to GitHub and deploy to **Cloudflare Pages** — see [`docs/dev-and-preview.md`](../../docs/dev-and-preview.md).
+**CI + hosting:** **GitHub Actions** builds and deploys to **Cloudflare Pages** — see [`docs/dev-and-preview.md`](../../docs/dev-and-preview.md). You can still use Azure DevOps Git as a second remote if your org requires it.
 
 ---
 
