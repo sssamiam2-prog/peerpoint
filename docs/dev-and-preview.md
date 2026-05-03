@@ -86,6 +86,30 @@ If you prefer Cloudflare to build the site (no GitHub Action):
 
 You still need a **GitHub** (or GitLab) connection for that wizard; Azure Repos alone is not supported as a first-class Pages Git source.
 
+### Mirror repo for this project
+
+GitHub remote (push target): **https://github.com/sssamiam2-prog/peer-support-app**
+
+Code is mirrored there from Azure Repos; add `git remote add github <url>` if you clone fresh (remote name `github`).
+
+### Push workflows to GitHub (`workflow` OAuth scope)
+
+GitHub rejects pushes that create or update `.github/workflows/*.yml` unless the credential includes the **`workflow`** scope (classic PAT or GitHub CLI).
+
+If `git push github main` fails with `workflow scope`, run:
+
+```bash
+gh auth refresh -s workflow -h github.com
+```
+
+Finish the browser/device login, then push again:
+
+```bash
+git push github main
+```
+
+Until those files exist on GitHub, **Actions** will not run; `gh workflow list` stays empty.
+
 ## SPA behavior on Pages
 
 Cloudflare Pages treats the app as an SPA when there is **no** top-level `404.html`. Do not add a root `404.html` unless you intend to change that behavior.
