@@ -1,6 +1,10 @@
 # SharePoint Lists (MVP schema)
 
-This app uses SharePoint Lists as the initial backend. These lists live in the SharePoint site hosting the SPFx web part.
+This app uses **SharePoint lists** as the database layer (not Cloudflare D1 or other external SQL). The PWA talks to these lists through **Microsoft Graph** using IDs in `apps/pwa/.env`; the SPFx web part uses the same lists by **list title** via REST.
+
+**Automated provisioning:** run [`scripts/Create-PeerPointSharePointLists.ps1`](../scripts/Create-PeerPointSharePointLists.ps1) from PowerShell (see script help). You must supply your **SharePoint site URL** and sign in as someone who can create lists.
+
+These lists live in the SharePoint site hosting the SPFx web part.
 
 ## Entra ID groups → roles
 
