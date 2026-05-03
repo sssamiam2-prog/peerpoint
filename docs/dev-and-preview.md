@@ -41,7 +41,7 @@ Pushes to `main` that touch `apps/pwa/`, `packages/shared/`, or the workflow fil
 
 ### Git repository layout
 
-- **GitHub** (for Actions + Pages): **https://github.com/sssamiam2-prog/peer-support-app** — add `git remote add github <url>` if you clone without it (remote name `github`).
+- **GitHub** (for Actions + Pages): **https://github.com/sssamiam2-prog/peerpoint** — add `git remote add github https://github.com/sssamiam2-prog/peerpoint.git` if you clone without it (remote name `github`).
 - **Azure DevOps** may still be used as an extra remote for org policy (`origin`). After local commits, push to both as needed, e.g. `git push origin main` and `git push github main`.
 
 ### Push workflows to GitHub (`workflow` OAuth scope)
