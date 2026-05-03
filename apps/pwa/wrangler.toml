@@ -1,0 +1,5 @@
+# Cloudflare Pages / Wrangler — optional local deploy: npm run deploy:pages
+# https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "peer-support-pwa"
+compatibility_date = "2025-04-30"
