@@ -1,6 +1,5 @@
 import * as React from 'react';
-import { useMsal, useIsAuthenticated } from '@azure/msal-react';
-import { createRequest, writeAudit } from '../graph/sharepointLists';
+import { appendLocalRequest, exportLocalRequestsJson, loadLocalRequests } from '../lib/localRequests';
 
 type FormState = {
   requesterName: string;
@@ -25,8 +24,6 @@ function isValidEmail(value: string): boolean {
 }
 
 export function RequestHelpPage(): React.ReactElement {
-  const { instance } = useMsal();
-  const authed = useIsAuthenticated();
   const [state, setState] = React.useState<FormState>(defaultState);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>(undefined);
@@ -41,7 +38,7 @@ export function RequestHelpPage(): React.ReactElement {
         : undefined;
   const consentError = !state.consentAcknowledged ? 'Please acknowledge the confidentiality notice.' : undefined;
 
-  const canSubmit = authed && !submitting && !phoneError && !emailError && !consentError;
+  const canSubmit = !submitting && !phoneError && !emailError && !consentError;
 
   const onSubmit = async (): Promise<void> => {
     setError(undefined);
@@ -50,7 +47,8 @@ export function RequestHelpPage(): React.ReactElement {
 
     setSubmitting(true);
     try {
-      await createRequest(instance, {
+      appendLocalRequest({
+        submittedAt: new Date().toISOString(),
         requesterName: state.requesterName.trim() || undefined,
         requesterPhone: state.requesterPhone.trim(),
         requesterEmail: state.requesterEmail.trim(),
@@ -58,7 +56,6 @@ export function RequestHelpPage(): React.ReactElement {
         description: state.description.trim() || undefined,
         consentAcknowledged: state.consentAcknowledged
       });
-      await writeAudit(instance, 'RequestCreated');
       setSuccess(true);
       setState(defaultState);
     } catch (e: unknown) {
@@ -69,18 +66,21 @@ export function RequestHelpPage(): React.ReactElement {
   };
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div className="page-shell">
       <h2>Request Peer Support</h2>
       <p>If this is an emergency, call 911.</p>
-
-      {!authed && (
-        <div style={{ padding: 12, border: '1px solid #eee', borderRadius: 8 }}>
-          Sign in to submit a request.
-        </div>
-      )}
+      <p style={{ margin: '8px 0 0', padding: 10, background: '#f4f9f6', borderRadius: 8, fontSize: 13, color: '#2d6a4f' }}>
+        This standalone app saves your request <strong>only on this device</strong> (browser storage). It is not sent to a
+        server. Use export or a future agency integration when you connect a backend.
+      </p>
 
       {error && <div style={{ marginTop: 12, color: '#a4262c', whiteSpace: 'pre-wrap' }}>{error}</div>}
-      {success && <div style={{ marginTop: 12, color: '#107c10' }}>Request sent.</div>}
+      {success && (
+        <div style={{ marginTop: 12, color: '#107c10' }}>
+          Saved on this device. Your peer support team cannot see it until you use an integrated version or share the data
+          another way.
+        </div>
+      )}
 
       <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
         <label>
@@ -115,11 +115,31 @@ export function RequestHelpPage(): React.ReactElement {
         </label>
         {consentError && <div style={{ color: '#a4262c' }}>{consentError}</div>}
 
-        <button disabled={!canSubmit} onClick={onSubmit}>
-          {submitting ? 'Submitting…' : 'Submit request'}
+        <button type="button" disabled={!canSubmit} onClick={() => void onSubmit()}>
+          {submitting ? 'Saving…' : 'Save request on this device'}
         </button>
+
+        <p style={{ marginTop: 20, fontSize: 13, color: '#666' }}>
+          <button
+            type="button"
+            style={{ fontSize: 13 }}
+            onClick={() => {
+              const blob = new Blob([exportLocalRequestsJson()], { type: 'application/json' });
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = `peerpoint-requests-${new Date().toISOString().slice(0, 10)}.json`;
+              a.click();
+              URL.revokeObjectURL(a.href);
+            }}
+            disabled={loadLocalRequests().length === 0}
+          >
+            Export saved requests (JSON)
+          </button>
+          {loadLocalRequests().length > 0 && (
+            <span style={{ marginLeft: 8 }}>{loadLocalRequests().length} saved on this device</span>
+          )}
+        </p>
       </div>
     </div>
   );
 }
-
