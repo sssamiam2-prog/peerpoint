@@ -3,7 +3,9 @@ node_modules/
 
 # Build outputs
 dist/
-lib/
+# Do not use a bare `lib/` here — it ignores every folder named `lib` (e.g. `apps/pwa/src/lib/`).
+/lib/
+peer-support-app/lib/
 lib-dts/
 lib-commonjs/
 lib-esm/
@@ -26,6 +28,12 @@ coverage/
 .env
 .env.local
 .env.*.local
+
+# Ad-hoc Ably key text files at repo root (never commit)
+Ably_API_Ket7
+Ably_API_Ket7.txt
+Ably_API_Key
+Ably_API_Key.txt
 
 # OS / IDE
 .DS_Store

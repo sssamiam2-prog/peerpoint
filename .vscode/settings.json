@@ -1,0 +1,14 @@
+{
+  "eslint.workingDirectories": [{ "directory": "apps/pwa", "changeProcessCWD": true }],
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "apps/pwa/dev-dist": true,
+    "peer-support-app/lib": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "apps/pwa/dev-dist/**": true
+  }
+}

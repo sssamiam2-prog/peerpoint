@@ -1,23 +1,20 @@
 # PEERPoint PWA: GitHub Actions + Cloudflare Pages
 
-**PWA build and hosting** use **GitHub Actions** (CI) and **Cloudflare Pages** (static hosting). Azure Static Web Apps and Azure Pipelines definitions were removed from this repo in favor of that path.
+**Troubleshooting:** see [troubleshooting-pwa.md](./troubleshooting-pwa.md) (Ably chat, env, build, service worker).
 
-The **SPFx web part** still packages and deploys to **SharePoint** separately (`peer-support-app`); that flow is unchanged.
+**Product track:** standalone **PWA** in `apps/pwa` — **no Microsoft sign-in, Graph, or SharePoint** in the app. Requests are stored **only in the browser** (see Request Help); Self Help uses built-in articles.
+
+**CI/hosting:** **GitHub Actions** + **Cloudflare Pages** (see workflow below).
+
+The **`peer-support-app`** folder is an older **SPFx** solution kept in the repo for reference or a future SharePoint embed; it is **not** required to run or deploy the PWA.
 
 ## Day-to-day development (local)
 
-1. PWA:
-   ```bash
-   cd apps/pwa
-   npm install
-   npm run dev
-   ```
-2. SPFx web part (when needed):
-   ```bash
-   cd peer-support-app
-   npm install
-   gulp serve
-   ```
+```bash
+cd apps/pwa
+npm install
+npm run dev
+```
 
 ## Primary: deploy PWA with GitHub + Cloudflare
 
@@ -37,7 +34,7 @@ In the **GitHub** repo: **Settings → Secrets and variables → Actions**
 | `CLOUDFLARE_API_TOKEN` | API token from Cloudflare |
 | `CLOUDFLARE_ACCOUNT_ID` | Account ID from Cloudflare dashboard |
 
-Pushes to `main` that touch `apps/pwa/`, `packages/shared/`, or the workflow file trigger **Deploy PWA to Cloudflare Pages**. You can also run it from the **Actions** tab.
+Pushes to `main` that touch `apps/pwa/` or the workflow file trigger **Deploy PWA to Cloudflare Pages**. You can also run it from the **Actions** tab.
 
 ### Git repository layout
 
@@ -63,10 +60,6 @@ npm run deploy:pages
 ```
 
 (or `npm run build` then `npx wrangler pages deploy dist --project-name=peer-support-pwa`).
-
-### Entra ID (sign-in)
-
-Add each **preview and production** origin (e.g. `https://peer-support-pwa.pages.dev` and branch preview URLs) as **SPA redirect URIs** for the app registration used by the PWA.
 
 ### Cloudflare “Connect Git” instead of Actions
 
