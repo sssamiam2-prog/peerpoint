@@ -1,18 +1,12 @@
 import * as Ably from 'ably';
 import type { Message, PresenceMessage } from 'ably';
 import type { PeerChatMessage, PeerPresenceMember, PeerTypingPayload } from '../types/chat';
+import { isPeerChatDebugEnabled, peerChatLog, peerChatWarn } from './peerChatDebugLog';
 
+/** Wire event names — must match publish() calls. */
 export const PEER_CHAT_EVENT = 'peer_msg';
 export const PEER_TYPING_EVENT = 'peer_typing';
 
-/** Dev-only tracing — filter the browser console with `[PeerChat]`. Uses info so logs show without enabling Verbose. Never logs the API key. */
-function peerChatDebug(phase: string, detail?: Record<string, unknown>): void {
-  if (!import.meta.env.DEV) return;
-  if (detail !== undefined) console.info(`[PeerChat] ${phase}`, detail);
-  else console.info(`[PeerChat] ${phase}`);
-}
-
-/** Normalize key from .env / clipboard (quotes, BOM, newlines break Ably with "invalid key parameter"). */
 export function sanitizeAblyApiKey(raw: string): string {
   let s = raw.replace(/^\uFEFF/, '').trim();
   s = s.split(/\r?\n/)[0] ?? '';
@@ -27,11 +21,9 @@ export function sanitizeAblyApiKey(raw: string): string {
 }
 
 export function isPlausibleAblyApiKey(key: string): boolean {
-  // Typical format: appId.keyId:secret (colon separates key id from secret)
   return key.length >= 30 && key.includes(':') && key.includes('.');
 }
 
-/** Map Ably SDK errors to actionable copy (capability / channel restrictions). */
 export function explainAblyError(err: unknown): string {
   const raw =
     err instanceof Error
@@ -51,7 +43,7 @@ export function explainAblyError(err: unknown): string {
       '  peerpoint:room:*',
       '(For quick testing you can use one unrestricted key, or use channel pattern * with subscribe + publish + history + presence.)',
       '',
-      'Then run scripts/sync-ably-env.ps1 again (or update apps/pwa/.env) and restart npm run dev.'
+      'Then update apps/pwa/.env and restart npm run dev.'
     ].join('\n');
   }
 
@@ -76,7 +68,6 @@ export function normalizeRoomCodeInput(raw: string): { ok: true; code: string } 
   return { ok: true, code };
 }
 
-/** If Ably delivers JSON as a string or binary (wire/client variant), normalize before validation. */
 function unwrapMessageData(data: unknown): unknown {
   if (data === null || data === undefined) return data;
   if (typeof data === 'string') {
@@ -106,12 +97,26 @@ function unwrapMessageData(data: unknown): unknown {
   return data;
 }
 
-/** Ably / JSON may stringify fields; normalize so peers always render and dedupe works. */
+function asNonEmptyString(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    return t.length > 0 ? t : null;
+  }
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  return null;
+}
+
 export function normalizePeerChatPayload(data: unknown): PeerChatMessage | null {
   const unwrapped = unwrapMessageData(data);
   if (!unwrapped || typeof unwrapped !== 'object') return null;
   const o = unwrapped as Record<string, unknown>;
-  if (typeof o.id !== 'string' || typeof o.from !== 'string' || typeof o.text !== 'string') return null;
+  const id = asNonEmptyString(o.id);
+  const from = asNonEmptyString(o.from);
+  if (!id || !from) return null;
+  if (o.text === undefined || o.text === null) return null;
+  const text = String(o.text);
   let atNum: number;
   if (typeof o.at === 'number' && Number.isFinite(o.at)) {
     atNum = o.at;
@@ -121,23 +126,21 @@ export function normalizePeerChatPayload(data: unknown): PeerChatMessage | null 
   } else {
     atNum = Date.now();
   }
-  return { id: o.id, from: o.from, text: o.text, at: atNum };
+  return { id, from, text, at: atNum };
 }
 
 function parseTypingPayload(data: unknown): PeerTypingPayload | null {
   const unwrapped = unwrapMessageData(data);
   if (!unwrapped || typeof unwrapped !== 'object') return null;
   const o = unwrapped as Record<string, unknown>;
-  if (typeof o.from !== 'string' || typeof o.typing !== 'boolean') return null;
-  return { from: o.from, typing: o.typing };
+  const from = asNonEmptyString(o.from);
+  if (!from || typeof o.typing !== 'boolean') return null;
+  return { from, typing: o.typing };
 }
 
 export type AblyChatSession = {
-  /** Stable id for this tab: Ably `auth.clientId` when present, else `connection.id` (matches roster keys). */
   localClientId: string;
-  /** True if `channel.presence.enter` succeeded; roster callbacks run only when true. */
   presenceEnabled: boolean;
-  /** Returns the message so the UI can append locally (`echoMessages: false` on the client). */
   publish: (text: string) => Promise<PeerChatMessage | undefined>;
   publishTyping: (typing: boolean) => Promise<void>;
   close: () => void;
@@ -180,6 +183,83 @@ function rosterFromPresenceMessages(members: PresenceMessage[], fallbackName: st
   return roster;
 }
 
+function newMessageId(): string {
+  if (
+    typeof globalThis.crypto !== 'undefined' &&
+    typeof globalThis.crypto.randomUUID === 'function'
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `m-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+const ABLY_CLIENT_ID_STORAGE_KEY = 'peerpoint_ably_client_id';
+
+/**
+ * Ably requires a clientId for presence; some auth paths omit it. Persist one per tab
+ * so reconnects stay stable.
+ */
+function stableBrowserTabClientId(): string {
+  try {
+    const existing = sessionStorage.getItem(ABLY_CLIENT_ID_STORAGE_KEY);
+    if (
+      typeof existing === 'string' &&
+      existing.length > 0 &&
+      existing.length <= 128 &&
+      /^[a-zA-Z0-9._:@-]+$/.test(existing)
+    ) {
+      return existing;
+    }
+    const id =
+      typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto.randomUUID === 'function'
+        ? `peer-${globalThis.crypto.randomUUID()}`
+        : `peer-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    sessionStorage.setItem(ABLY_CLIENT_ID_STORAGE_KEY, id);
+    return id;
+  } catch {
+    return `peer-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  }
+}
+
+async function waitForRealtimeConnected(client: Ably.Realtime): Promise<void> {
+  const initial = client.connection.state;
+  if (initial === 'connected') return;
+  if (initial === 'failed' || initial === 'closed') {
+    throw new Error('Ably connection cannot start (already failed or closed). Check VITE_ABLY_KEY.');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out waiting for Ably (20s). Check network and VITE_ABLY_KEY.'));
+    }, 20_000);
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      client.connection.off(onState);
+    };
+
+    const onState = (change: Ably.ConnectionStateChange): void => {
+      if (change.current === 'connected') {
+        cleanup();
+        resolve();
+      } else if (change.current === 'failed' || change.current === 'closed') {
+        cleanup();
+        const msg =
+          change.reason &&
+          typeof change.reason === 'object' &&
+          change.reason !== null &&
+          'message' in change.reason
+            ? String((change.reason as { message?: string }).message ?? change.reason)
+            : `Ably connection ${String(change.current)}`;
+        reject(new Error(explainAblyError(new Error(msg))));
+      }
+    };
+
+    client.connection.on(onState);
+  });
+}
+
 export async function connectPeerChat(
   apiKey: string,
   roomCode: string,
@@ -191,21 +271,35 @@ export async function connectPeerChat(
 ): Promise<AblyChatSession> {
   const key = sanitizeAblyApiKey(apiKey);
   const chanName = channelNameForRoom(roomCode);
-  peerChatDebug('connect:start', {
+  peerChatLog('ably', 'connect:start', {
     channel: chanName,
     roomCode,
     displayName: displayName.trim() || 'Anonymous'
   });
+
   if (!isPlausibleAblyApiKey(key)) {
     throw new Error(
       'Ably API key looks incomplete or wrong. Copy the full key from Ably (format like xxx.yyy:secret), one line, no quotes — then fix apps/pwa/.env and restart npm run dev.'
     );
   }
-  const fallbackName = displayName.trim() || 'Anonymous';
-  const client = new Ably.Realtime({ key, echoMessages: false });
-  const channel = client.channels.get(chanName);
 
-  await channel.attach();
+  const fallbackName = displayName.trim() || 'Anonymous';
+
+  const client = new Ably.Realtime({
+    key,
+    clientId: stableBrowserTabClientId(),
+    echoMessages: false,
+    ...(isPeerChatDebugEnabled()
+      ? {
+          logLevel: 2,
+          logHandler: (msg: string): void => {
+            if (/message|protocol|subscribe|publish|peer_msg|peerpoint/i.test(msg)) {
+              peerChatLog('ably', 'protocol', { line: msg.slice(0, 300) });
+            }
+          }
+        }
+      : {})
+  });
 
   const onConn = (change: Ably.ConnectionStateChange): void => {
     const reason =
@@ -214,7 +308,7 @@ export async function connectPeerChat(
         : change.reason !== undefined
           ? String(change.reason)
           : undefined;
-    peerChatDebug('connection', {
+    peerChatLog('ably', 'connection', {
       previous: change.previous,
       current: change.current,
       ...(reason ? { reason } : {})
@@ -223,58 +317,80 @@ export async function connectPeerChat(
   };
   client.connection.on(onConn);
 
-  peerChatDebug('connection:initial', { state: client.connection.state });
+  peerChatLog('ably', 'connection:initial', { state: client.connection.state });
 
-  /** One listener + filter by `message.name` — avoids edge cases where named-event subscriptions do not fire. */
-  const inboundHandler = (m: Message): void => {
-    if (m.name === PEER_CHAT_EVENT) {
-      const normalized = normalizePeerChatPayload(m.data);
-      if (normalized) {
-        peerChatDebug('recv:peer_msg', {
-          id: normalized.id,
-          from: normalized.from,
-          textLen: normalized.text.length,
-          connectionId: m.connectionId
-        });
-        onMessage(normalized);
-      } else {
-        peerChatDebug('recv:peer_msg:skipped_invalid_payload', {
-          messageEventName: m.name,
-          dataPreview:
-            m.data === null || m.data === undefined
-              ? String(m.data)
-              : typeof m.data === 'object' && !(m.data instanceof ArrayBuffer) && !ArrayBuffer.isView(m.data)
-                ? '[object]'
-                : String(m.data).slice(0, 120)
-        });
-      }
-      return;
-    }
-    if (onTyping && m.name === PEER_TYPING_EVENT) {
-      const typing = parseTypingPayload(m.data);
-      if (typing) {
-        peerChatDebug('recv:peer_typing', { from: typing.from, typing: typing.typing });
-        onTyping(typing);
-      }
+  await waitForRealtimeConnected(client);
+  peerChatLog('ably', 'connection:ready', { state: client.connection.state });
+
+  const channel = client.channels.get(chanName);
+
+  await channel.attach();
+
+  const onChatInbound = (m: Message): void => {
+    peerChatLog('ably', 'raw_inbound', {
+      event: PEER_CHAT_EVENT,
+      name: m.name ?? '(none)',
+      dataType: m.data === null || m.data === undefined ? 'nullish' : typeof m.data
+    });
+
+    const normalized = normalizePeerChatPayload(m.data);
+    if (normalized) {
+      peerChatLog('ably', 'recv:peer_msg', {
+        id: normalized.id,
+        from: normalized.from,
+        textLen: normalized.text.length,
+        connectionId: m.connectionId
+      });
+      onMessage(normalized);
+    } else {
+      peerChatWarn('ably', 'recv:peer_msg:skipped_invalid_payload', {
+        messageEventName: m.name,
+        dataPreview:
+          m.data === null || m.data === undefined
+            ? String(m.data)
+            : typeof m.data === 'object' &&
+                !(m.data instanceof ArrayBuffer) &&
+                !ArrayBuffer.isView(m.data)
+              ? JSON.stringify(m.data).slice(0, 200)
+              : String(m.data).slice(0, 120)
+      });
     }
   };
 
-  await channel.subscribe(inboundHandler);
-  peerChatDebug('subscribe', { mode: 'all_messages', filter: [PEER_CHAT_EVENT, PEER_TYPING_EVENT] });
+  const onTypingInbound = (m: Message): void => {
+    peerChatLog('ably', 'raw_inbound', {
+      event: PEER_TYPING_EVENT,
+      name: m.name ?? '(none)',
+      dataType: m.data === null || m.data === undefined ? 'nullish' : typeof m.data
+    });
+    if (!onTyping) return;
+    const typing = parseTypingPayload(m.data);
+    if (typing) {
+      peerChatLog('ably', 'recv:peer_typing', { from: typing.from, typing: typing.typing });
+      onTyping(typing);
+    }
+  };
+
+  /** Two explicit named subscriptions (Ably FAQ: event name must match publish exactly). */
+  await channel.subscribe(PEER_CHAT_EVENT, onChatInbound);
+  peerChatLog('ably', 'subscribe', { event: PEER_CHAT_EVENT });
+  if (onTyping) {
+    await channel.subscribe(PEER_TYPING_EVENT, onTypingInbound);
+    peerChatLog('ably', 'subscribe', { event: PEER_TYPING_EVENT });
+  }
 
   try {
     const page = await channel.history({ direction: 'backwards', limit: 50 });
-    peerChatDebug('history:loaded', { count: page.items.length });
+    peerChatLog('ably', 'history:loaded', { count: page.items.length });
     for (const item of page.items) {
       if (item.name !== PEER_CHAT_EVENT) continue;
       const normalized = normalizePeerChatPayload(item.data);
       if (normalized) onMessage(normalized);
     }
   } catch (e: unknown) {
-    peerChatDebug('history:error', {
+    peerChatWarn('ably', 'history:error', {
       message: e instanceof Error ? e.message : String(e)
     });
-    // History may be empty or unavailable depending on Ably app settings; live chat still works.
   }
 
   let presenceEnabled = false;
@@ -286,7 +402,7 @@ export async function connectPeerChat(
       const members = await channel.presence.get();
       onPresence(rosterFromPresenceMessages(members, fallbackName));
     } catch {
-      // Ignore transient presence errors; chat remains usable.
+      /* ignore */
     }
   };
 
@@ -294,7 +410,7 @@ export async function connectPeerChat(
     try {
       await channel.presence.enter({ name: fallbackName });
       presenceEnabled = true;
-      peerChatDebug('presence:enter', { ok: true });
+      peerChatLog('ably', 'presence:enter', { ok: true });
       await pushRoster();
       const subHandler = (): void => {
         void pushRoster();
@@ -305,7 +421,7 @@ export async function connectPeerChat(
       };
     } catch (e: unknown) {
       presenceEnabled = false;
-      peerChatDebug('presence:enter', {
+      peerChatWarn('ably', 'presence:enter', {
         ok: false,
         message: e instanceof Error ? e.message : String(e)
       });
@@ -317,7 +433,7 @@ export async function connectPeerChat(
       ? client.auth.clientId.trim()
       : client.connection.id) || '';
 
-  peerChatDebug('connect:ready', {
+  peerChatLog('ably', 'connect:ready', {
     connectionState: client.connection.state,
     channelState: channel.state,
     presenceEnabled,
@@ -333,22 +449,18 @@ export async function connectPeerChat(
       const trimmed = text.trim();
       if (!trimmed) return undefined;
       const msg: PeerChatMessage = {
-        id:
-          typeof globalThis.crypto !== 'undefined' &&
-          typeof globalThis.crypto.randomUUID === 'function'
-            ? globalThis.crypto.randomUUID()
-            : `m-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        id: newMessageId(),
         from: fallbackName,
         text: trimmed,
         at: Date.now()
       };
-      peerChatDebug('publish:peer_msg', { id: msg.id, textLen: trimmed.length });
+      peerChatLog('ably', 'publish:peer_msg', { id: msg.id, textLen: trimmed.length });
       try {
         await channel.publish(PEER_CHAT_EVENT, msg);
-        peerChatDebug('publish:peer_msg:ok', { id: msg.id });
+        peerChatLog('ably', 'publish:peer_msg:ok', { id: msg.id });
         return msg;
       } catch (e: unknown) {
-        peerChatDebug('publish:peer_msg:error', {
+        peerChatWarn('ably', 'publish:peer_msg:error', {
           id: msg.id,
           message: e instanceof Error ? e.message : String(e)
         });
@@ -360,25 +472,24 @@ export async function connectPeerChat(
       try {
         await channel.publish(PEER_TYPING_EVENT, payload);
       } catch (e: unknown) {
-        peerChatDebug('publish:peer_typing:error', {
+        peerChatWarn('ably', 'publish:peer_typing:error', {
           message: e instanceof Error ? e.message : String(e)
         });
-        // Typing is optional; avoid unhandled rejections while connection stabilizes (e.g. Strict Mode remount).
       }
     },
     close: (): void => {
-      peerChatDebug('session:close');
+      peerChatLog('ably', 'session:close');
       client.connection.off(onConn);
-      channel.unsubscribe(inboundHandler);
+      channel.unsubscribe(PEER_CHAT_EVENT, onChatInbound);
+      if (onTyping) {
+        channel.unsubscribe(PEER_TYPING_EVENT, onTypingInbound);
+      }
       presenceUnsub?.();
       const shutdown = (): void => {
         client.close();
       };
       if (presenceEnabled) {
-        void channel.presence
-          .leave()
-          .then(shutdown)
-          .catch(shutdown);
+        void channel.presence.leave().then(shutdown).catch(shutdown);
       } else {
         shutdown();
       }

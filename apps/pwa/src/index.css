@@ -17,7 +17,7 @@
 
   font: 18px/145% var(--sans);
   letter-spacing: 0.18px;
-  color-scheme: light dark;
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -30,23 +30,20 @@
   }
 }
 
+/* Keep the same light-on-white palette even when the OS prefers dark (user-requested white app shell). */
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
+    --text: #6b6375;
+    --text-h: #08060d;
+    --bg: #fff;
+    --border: #e5e4e7;
+    --code-bg: #f4f3ec;
+    --accent: #aa3bff;
+    --accent-bg: rgba(170, 59, 255, 0.1);
+    --accent-border: rgba(170, 59, 255, 0.5);
+    --social-bg: rgba(244, 243, 236, 0.5);
     --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+      rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
   }
 }
 
@@ -69,8 +66,13 @@
   }
 }
 
+html {
+  background: #fff;
+}
+
 body {
   margin: 0;
+  background: #fff;
 }
 
 /* App shell — responsive padding and readable width */
@@ -250,6 +252,59 @@ code {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.peer-chat-roster-panel {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--social-bg);
+}
+
+.peer-chat-roster-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.peer-chat-roster-status {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.peer-chat-roster-standby {
+  margin: 0 0 10px;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: rgba(27, 67, 50, 0.06);
+  color: var(--text-h);
+}
+
+.peer-chat-roster-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-h);
+}
+
+.peer-chat-roster-name {
+  font-weight: 600;
+}
+
+.peer-chat-roster-you {
+  font-weight: 500;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.peer-chat-roster-code {
+  font-size: 0.9em;
 }
 
 .peer-chat-presence {

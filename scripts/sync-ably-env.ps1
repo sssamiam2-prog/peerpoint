@@ -5,7 +5,8 @@ $candidates = @(
   (Join-Path $root 'Ably_API_Ket7'),
   (Join-Path $root 'Ably_API_Ket7.txt'),
   (Join-Path $root 'Ably_API_Key.txt'),
-  (Join-Path $root 'Ably_API_Key')
+  (Join-Path $root 'Ably_API_Key'),
+  (Join-Path $root 'Root_API.txt')
 )
 $keyPath = $null
 foreach ($p in $candidates) {
@@ -20,6 +21,7 @@ if (-not $keyPath) {
   Write-Host '  Ably_API_Ket7.txt'
   Write-Host '  Ably_API_Key'
   Write-Host '  Ably_API_Key.txt'
+  Write-Host '  Root_API.txt'
   exit 1
 }
 $key = (Get-Content -LiteralPath $keyPath -Raw).Trim()

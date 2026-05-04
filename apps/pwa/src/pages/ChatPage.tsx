@@ -5,16 +5,10 @@ import {
   normalizeRoomCodeInput,
   sanitizeAblyApiKey
 } from '../lib/peerChatAbly';
+import { peerChatLog, peerChatWarn } from '../lib/peerChatDebugLog';
 import type { PeerChatMessage, PeerPresenceMember } from '../types/chat';
 
 const DISPLAY_KEY = 'peerpoint_chat_display_name';
-
-/** Dev-only — filter console with `[PeerChat UI]`. Uses info so logs show without enabling Verbose. */
-function chatUiDebug(phase: string, detail?: Record<string, unknown>): void {
-  if (!import.meta.env.DEV) return;
-  if (detail !== undefined) console.info(`[PeerChat UI] ${phase}`, detail);
-  else console.info(`[PeerChat UI] ${phase}`);
-}
 
 function formatTime(ts: number): string {
   try {
@@ -72,16 +66,26 @@ export function ChatPage(): React.ReactElement {
       const next = [...prev];
       for (const m of incoming) {
         if (seenIds.current.has(m.id)) {
-          chatUiDebug('message:deduped', { id: m.id, from: m.from });
+          peerChatLog('ui', 'message:deduped', { id: m.id, from: m.from });
           continue;
         }
         seenIds.current.add(m.id);
-        chatUiDebug('message:append', { id: m.id, from: m.from, textLen: m.text.length });
+        peerChatLog('ui', 'message:append', { id: m.id, from: m.from, textLen: m.text.length });
         next.push(m);
       }
       next.sort((a, b) => a.at - b.at);
       return next;
     });
+  }, []);
+
+  /** Always forwards to the latest handler so Ably callbacks never close over a stale StrictMode render. */
+  const inboundRelayRef = React.useRef<(msg: PeerChatMessage) => void>(() => {});
+  inboundRelayRef.current = (msg: PeerChatMessage): void => {
+    appendMessages([msg]);
+    setTypingOthers(prev => prev.filter(n => n !== msg.from));
+  };
+  const relayInbound = React.useCallback((msg: PeerChatMessage) => {
+    inboundRelayRef.current(msg);
   }, []);
 
   const flushLocalTyping = React.useCallback((): void => {
@@ -130,17 +134,12 @@ export function ChatPage(): React.ReactElement {
           ablyKey,
           session.room,
           session.name,
-          msg => {
-            if (closed || epoch !== chatEpochRef.current) return;
-            appendMessages([msg]);
-            setTypingOthers(prev => prev.filter(n => n !== msg.from));
-          },
+          relayInbound,
           state => {
             if (closed || epoch !== chatEpochRef.current) return;
             setConnState(state);
           },
           payload => {
-            if (closed || epoch !== chatEpochRef.current) return;
             if (isSelfMessage(payload.from, session.name)) return;
             setTypingOthers(prev => {
               const s = new Set(prev);
@@ -163,14 +162,14 @@ export function ChatPage(): React.ReactElement {
         publishRef.current = chat.publish;
         typingPublishRef.current = chat.publishTyping;
         closeSession = chat.close;
-        chatUiDebug('session:publish_ready', {
+        peerChatLog('ui', 'session:publish_ready', {
           room: session.room,
           presenceEnabled: chat.presenceEnabled,
           localClientId: chat.localClientId
         });
       } catch (e: unknown) {
         if (!closed && epoch === chatEpochRef.current) {
-          chatUiDebug('session:connect_failed', {
+          peerChatWarn('ui', 'session:connect_failed', {
             message: e instanceof Error ? e.message : String(e)
           });
           setMessages([]);
@@ -225,12 +224,12 @@ export function ChatPage(): React.ReactElement {
     setLocalClientId(null);
     setPresenceEnabled(false);
     setConnState('connecting');
-    chatUiDebug('join', { room: parsed.code, name });
+    peerChatLog('ui', 'join', { room: parsed.code, name });
     setSession({ room: parsed.code, name });
   };
 
   const onLeave = (): void => {
-    chatUiDebug('leave');
+    peerChatLog('ui', 'leave');
     flushLocalTyping();
     setSession(null);
     setMessages([]);
@@ -248,23 +247,24 @@ export function ChatPage(): React.ReactElement {
     flushLocalTyping();
     const publish = publishRef.current;
     if (!publish) {
-      chatUiDebug('send:blocked', { reason: 'no_publish_fn', connState });
+      peerChatLog('ui', 'send:blocked', { reason: 'no_publish_fn', connState });
       setSendError('Not connected yet.');
       return;
     }
     if (connState !== 'connected') {
-      chatUiDebug('send:blocked', { reason: 'not_connected', connState });
+      peerChatLog('ui', 'send:blocked', { reason: 'not_connected', connState });
     }
     try {
-      chatUiDebug('send:start', { connState, draftLen: draft.trim().length });
+      peerChatLog('ui', 'send:start', { connState, draftLen: draft.trim().length });
       const sent = await publish(draft);
       if (sent) {
         appendMessages([sent]);
       }
-      chatUiDebug('send:ok');
+      /** Echo from Ably is also enabled; `seenIds` dedupes if both arrive. */
+      peerChatLog('ui', 'send:ok');
       setDraft('');
     } catch (e: unknown) {
-      chatUiDebug('send:error', { message: e instanceof Error ? e.message : String(e) });
+      peerChatWarn('ui', 'send:error', { message: e instanceof Error ? e.message : String(e) });
       setSendError(explainAblyError(e));
     }
   };
