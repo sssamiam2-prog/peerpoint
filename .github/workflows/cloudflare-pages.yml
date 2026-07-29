@@ -1,10 +1,12 @@
-# Primary PWA pipeline: build on GitHub Actions, deploy static dist to Cloudflare Pages.
+# Primary PWA pipeline: build on GitHub Actions, deploy static dist + Pages Functions to Cloudflare Pages.
 #
 # Secrets (repo → Settings → Secrets and variables → Actions):
-#   CLOUDFLARE_API_TOKEN   — API token with "Cloudflare Pages — Edit"
-#   CLOUDFLARE_ACCOUNT_ID  — from Cloudflare Workers & Pages overview
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   VITE_ABLY_KEY (optional local fallback baked into client)
+#   VITE_ABLY_AUTH_URL (optional; set to /api/ably-token for token auth builds)
 #
-# Pages project name defaults to peer-support-pwa; change --project-name below and wrangler.toml / package.json deploy:pages if needed.
+# Cloudflare Pages project secrets: ABLY_API_KEY, STAFF_PASSWORD, optional TEAMS_WEBHOOK_URL
+# Optional KV binding: PEERPOINT_KV
 
 name: Deploy PWA to Cloudflare Pages
 
@@ -13,7 +15,6 @@ on:
     branches: [main]
     paths:
       - 'apps/pwa/**'
-      - 'packages/shared/**'
       - '.github/workflows/cloudflare-pages.yml'
   workflow_dispatch:
 
@@ -24,6 +25,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/pwa
     steps:
       - uses: actions/checkout@v4
 
@@ -34,16 +38,18 @@ jobs:
           cache-dependency-path: apps/pwa/package-lock.json
 
       - name: Build PWA
-        working-directory: apps/pwa
+        env:
+          VITE_ABLY_KEY: ${{ secrets.VITE_ABLY_KEY }}
+          VITE_ABLY_AUTH_URL: ${{ secrets.VITE_ABLY_AUTH_URL }}
         run: |
           npm ci
           npm run build
 
       - name: Deploy to Cloudflare Pages
-        id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/pwa/dist --project-name=peer-support-pwa
+          workingDirectory: apps/pwa
+          command: pages deploy dist --project-name=peer-support-pwa
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}

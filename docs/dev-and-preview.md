@@ -1,5 +1,9 @@
 # PEERPoint PWA: GitHub Actions + Cloudflare Pages
 
+**Administrator / staff how-to:** see [admin-user-manual.md](./admin-user-manual.md).
+
+**Hosts:** members + staff → `https://mypeerpoint.com`; Admin login only → `https://admin.mypeerpoint.com` (same Pages project; add custom domain + CNAME).
+
 **Troubleshooting:** see [troubleshooting-pwa.md](./troubleshooting-pwa.md) (Ably chat, env, build, service worker).
 
 **Product track:** standalone **PWA** in `apps/pwa` — **no Microsoft sign-in, Graph, or SharePoint** in the app. Requests are stored **only in the browser** (see Request Help); Self Help uses built-in articles.
@@ -18,7 +22,7 @@ npm run dev
 
 ## Primary: deploy PWA with GitHub + Cloudflare
 
-Workflow: [`.github/workflows/cloudflare-pages.yml`](../.github/workflows/cloudflare-pages.yml) — on push to `main` (paths under `apps/pwa/`, `packages/shared/`, or the workflow file), or **workflow_dispatch**, it runs `npm ci` + `npm run build` in `apps/pwa`, then `wrangler pages deploy`.
+Workflow: [`.github/workflows/cloudflare-pages.yml`](../.github/workflows/cloudflare-pages.yml) — on push to `main` (paths under `apps/pwa/` or the workflow file), or **workflow_dispatch**, it runs `npm ci` + `npm run build` in `apps/pwa`, then `wrangler pages deploy`.
 
 ### One-time: Cloudflare
 
@@ -33,8 +37,62 @@ In the **GitHub** repo: **Settings → Secrets and variables → Actions**
 |------|--------|
 | `CLOUDFLARE_API_TOKEN` | API token from Cloudflare |
 | `CLOUDFLARE_ACCOUNT_ID` | Account ID from Cloudflare dashboard |
+| `VITE_ABLY_KEY` | *(optional but recommended)* Your Ably API key so **Peer chat** and **Peer voice** work on the live site (same key as local `.env`). |
 
 Pushes to `main` that touch `apps/pwa/` or the workflow file trigger **Deploy PWA to Cloudflare Pages**. You can also run it from the **Actions** tab.
+
+After the first successful deploy, Cloudflare shows the production URL, typically:
+
+`https://peer-support-pwa.pages.dev`
+
+**Canonical public URL:** [https://mypeerpoint.com](https://mypeerpoint.com) (custom domain on the same Pages project — see below).
+
+---
+
+## Custom domain: `mypeerpoint.com` (Cloudflare Registrar)
+
+Because the domain was purchased through Cloudflare, DNS already lives in your account. Attach it to the Pages app:
+
+1. Open [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → project **`peer-support-pwa`**.
+2. Open **Custom domains** → **Set up a domain**.
+3. Enter **`mypeerpoint.com`** (and optionally **`www.mypeerpoint.com`** as a second domain or redirect).
+4. Confirm. Cloudflare will create/update the DNS records that point the zone at Pages and issue HTTPS automatically.
+5. Wait until status is **Active**, then open **https://mypeerpoint.com** and confirm the PWA loads.
+
+Optional but recommended:
+
+- **www → apex:** In the zone’s **Rules** (or Pages custom domain settings), redirect `www.mypeerpoint.com` → `https://mypeerpoint.com` so one origin is canonical.
+- **Short.io:** If you still use `slco.to/peerpoint`, set its destination to `https://mypeerpoint.com/` (not `*.pages.dev`).
+
+Production Ably token auth (`VITE_ABLY_AUTH_URL=/api/ably-token`) and Pages Function secrets (`ABLY_API_KEY`, `STAFF_PASSWORD`, etc.) apply to this domain the same as `*.pages.dev`.
+
+---
+
+## Short link: `https://slco.to/peerpoint` → Cloudflare Pages
+
+Use **Short.io** only as a **redirect** to your real HTTPS URL. The PWA runs on Cloudflare; the short link is for posters and SMS.
+
+### A. Confirm Cloudflare Pages is live
+
+1. Complete **Cloudflare Pages project** + **GitHub secrets** above and run the deploy workflow once.
+2. Open **https://mypeerpoint.com** (or **Pages → peer-support-pwa → Visit site** while the custom domain is pending) and confirm the app loads over **HTTPS**.
+3. Canonical site URL: **`https://mypeerpoint.com/`**.
+
+### B. Short.io — create `slco.to/peerpoint`
+
+1. Sign in at [Short.io](https://short.io/) (or your organization’s Short.io workspace).
+2. Ensure the branded domain **`slco.to`** is added and **DNS is verified** per Short.io’s instructions (usually **CNAME** records at your DNS host pointing at Short.io). Skip this step only if `slco.to` is already active there.
+3. **Create a link:**
+   - **Path:** `peerpoint` (full short URL: `https://slco.to/peerpoint`).
+   - **Destination URL:** `https://mypeerpoint.com/` (include `https://`).
+   - Use a normal **301 or 302** redirect (Short.io default is fine).
+4. Test in a private window: `https://slco.to/peerpoint` → should land on **mypeerpoint.com**.
+
+### C. Ably on production builds
+
+If **`VITE_ABLY_KEY`** / token auth is missing from GitHub Actions secrets and Pages Function secrets, the deployed app will load but chat/voice will ask for configuration. Add the secrets and redeploy.
+
+---
 
 ### Git repository layout
 
@@ -53,13 +111,24 @@ Then `git push github main` again.
 
 ### Local deploy to Pages (no GitHub)
 
-From `apps/pwa`:
+From `apps/pwa`, set a **Cloudflare API token** in your shell (do not commit it), with **Account → Cloudflare Pages → Edit**, then:
+
+**Windows (PowerShell):**
+
+```powershell
+$env:CLOUDFLARE_API_TOKEN = "<your-api-token>"
+.\scripts\deploy-pages.ps1
+```
+
+**Any OS:**
 
 ```bash
+export CLOUDFLARE_API_TOKEN="<your-api-token>"   # Windows PowerShell: $env:CLOUDFLARE_API_TOKEN="..."
+cd apps/pwa
 npm run deploy:pages
 ```
 
-(or `npm run build` then `npx wrangler pages deploy dist --project-name=peer-support-pwa`).
+`npm run deploy:pages` runs `npm run build` then `npx wrangler pages deploy dist --project-name=peer-support-pwa`. The first successful upload **creates** the `peer-support-pwa` project if it does not exist. Your app URL will look like `https://peer-support-pwa.pages.dev` (check the command output and **Workers & Pages** in the dashboard).
 
 ### Cloudflare “Connect Git” instead of Actions
 
@@ -68,6 +137,7 @@ If you prefer Cloudflare to run the build (no GitHub Action):
 - **Root directory:** `apps/pwa`
 - **Build command:** `npm ci && npm run build` (`apps/pwa/.npmrc` enables `npm ci` with Vite 8 + `vite-plugin-pwa`.)
 - **Build output directory:** `dist`
+- **Environment variables (production):** add **`VITE_ABLY_KEY`** with the same value you use locally so chat/voice work when Cloudflare builds the app.
 
 ### `staticwebapp.config.json`
 

@@ -1,0 +1,40 @@
+# HTML shell — always revalidate so deploys are not stuck behind CDN/browser cache
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+# Hashed Vite assets — long cache, but revalidate so a poisoned SPA HTML
+# response for a missing CSS/JS URL cannot stick for a year.
+/assets/*
+  Cache-Control: public, max-age=86400, must-revalidate
+  CDN-Cache-Control: public, max-age=86400, stale-while-revalidate=60
+
+# Service worker must never be cached stale
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+  Service-Worker-Allowed: /
+
+/workbox-*.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+
+/manifest.webmanifest
+  Cache-Control: no-cache, must-revalidate
+  CDN-Cache-Control: no-store
+
+/registerSW.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  CDN-Cache-Control: no-store
+
+# Admin how-to downloads — short cache, revalidate
+/docs/*
+  Cache-Control: public, max-age=300, must-revalidate

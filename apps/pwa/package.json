@@ -1,19 +1,20 @@
 {
   "name": "@slco-peer-support/pwa",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.2.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=peer-support-pwa"
+    "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=peer-support-pwa",
+    "pages:dev": "npm run build && wrangler pages dev dist --compatibility-date=2025-04-30",
+    "docs:howto": "python scripts/generate-howtos.py",
+    "docs:admin-howto": "python scripts/generate-howtos.py"
   },
   "dependencies": {
-    "@azure/msal-browser": "^4.24.0",
-    "@azure/msal-react": "^3.0.0",
-    "@slco-peer-support/shared": "file:../../packages/shared",
+    "ably": "^2.21.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.9.0"

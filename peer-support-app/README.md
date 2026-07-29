@@ -1,4 +1,6 @@
-# peer-support-app
+# peer-support-app (SPFx — not the active PEERPoint track)
+
+The product focus is the **standalone PWA** under `../apps/pwa` (no Microsoft integration in that app). This SharePoint Framework project remains in the repo for reference or a future SharePoint-hosted experience.
 
 ## Summary
 

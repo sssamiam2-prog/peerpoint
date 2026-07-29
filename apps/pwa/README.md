@@ -1,8 +1,14 @@
 # PEERPoint PWA
 
+Standalone installable web app: **no Microsoft sign-in**, **no Graph/SharePoint**. Request Help saves to **this device’s browser storage** only; Self Help is built-in content.
+
+**Peer chat** (`/chat`): participants enter the same **room code** to join one channel. Requires `VITE_ABLY_KEY` in `.env` (see `.env.example`); messages go through [Ably](https://ably.com/), not your tenant.
+
 Local dev: `npm install` → `npm run dev`. Production build: `npm run build` (output in `dist/`).
 
-**CI + hosting:** **GitHub Actions** builds and deploys to **Cloudflare Pages** — see [`docs/dev-and-preview.md`](../../docs/dev-and-preview.md). You can still use Azure DevOps Git as a second remote if your org requires it.
+**CI + hosting:** **GitHub Actions** → **Cloudflare Pages** — [`docs/dev-and-preview.md`](../../docs/dev-and-preview.md).
+
+**Staff / administrator how-to:** [`docs/admin-user-manual.md`](../../docs/admin-user-manual.md).
 
 ---
 

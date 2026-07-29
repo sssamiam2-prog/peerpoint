@@ -1,5 +1,11 @@
-# Cloudflare Pages / Wrangler — optional local deploy: npm run deploy:pages
-# https://developers.cloudflare.com/workers/wrangler/configuration/
+# Cloudflare Pages / Wrangler — `npm run deploy:pages` or `npx wrangler pages deploy`
+# https://developers.cloudflare.com/pages/functions/wrangler-configuration/
 
 name = "peer-support-pwa"
 compatibility_date = "2025-04-30"
+pages_build_output_dir = "dist"
+
+# Required for staff accounts + durable help requests / Admin sessions.
+[[kv_namespaces]]
+binding = "PEERPOINT_KV"
+id = "17e10b65c05b432aa1281484f9eb5a0c"

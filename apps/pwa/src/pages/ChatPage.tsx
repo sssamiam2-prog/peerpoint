@@ -1,11 +1,15 @@
 import * as React from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { hasAblyAuthConfigured } from '../lib/ablyAuth';
 import {
+  channelNameForRoom,
+  clearPeerChatBrowserStorage,
   connectPeerChat,
   explainAblyError,
   normalizeRoomCodeInput,
   sanitizeAblyApiKey
 } from '../lib/peerChatAbly';
-import { peerChatLog, peerChatWarn } from '../lib/peerChatDebugLog';
+import { isPeerChatDebugEnabled, peerChatLog, peerChatWarn } from '../lib/peerChatDebugLog';
 import type { PeerChatMessage, PeerPresenceMember } from '../types/chat';
 
 const DISPLAY_KEY = 'peerpoint_chat_display_name';
@@ -22,6 +26,17 @@ function isSelfMessage(from: string, selfDisplayName: string): boolean {
   return from.trim().toLowerCase() === selfDisplayName.trim().toLowerCase();
 }
 
+const BUBBLE_TONE_COUNT = 8;
+function bubbleToneIndex(from: string): number {
+  const s = from.trim().toLowerCase();
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h) % BUBBLE_TONE_COUNT;
+}
+
 function formatTypingLine(names: string[]): string {
   if (names.length === 0) return '';
   if (names.length === 1) return `${names[0]} is typing`;
@@ -29,12 +44,20 @@ function formatTypingLine(names: string[]): string {
   return `${names[0]}, ${names[1]}, and ${names.length - 2} more are typing`;
 }
 
+function useShowChatDebug(): boolean {
+  const [params] = useSearchParams();
+  if (params.get('debug') === '1') return true;
+  return isPeerChatDebugEnabled();
+}
+
 export function ChatPage(): React.ReactElement {
+  const [params] = useSearchParams();
   const ablyKeyRaw = import.meta.env.VITE_ABLY_KEY as string | undefined;
   const ablyKey = ablyKeyRaw ? sanitizeAblyApiKey(ablyKeyRaw) : undefined;
-  const hasKey = Boolean(ablyKey && ablyKey.length > 0);
+  const hasKey = hasAblyAuthConfigured(ablyKey);
+  const showDebug = useShowChatDebug();
 
-  const [roomInput, setRoomInput] = React.useState('');
+  const [roomInput, setRoomInput] = React.useState(() => (params.get('room') ?? '').trim().toUpperCase());
   const [nameInput, setNameInput] = React.useState(() => {
     try {
       return sessionStorage.getItem(DISPLAY_KEY) ?? '';
@@ -52,14 +75,17 @@ export function ChatPage(): React.ReactElement {
   const [presenceMembers, setPresenceMembers] = React.useState<PeerPresenceMember[]>([]);
   const [localClientId, setLocalClientId] = React.useState<string | null>(null);
   const [presenceEnabled, setPresenceEnabled] = React.useState(false);
+  const [publishReady, setPublishReady] = React.useState(false);
+  const [channelName, setChannelName] = React.useState<string | null>(null);
+  const [connectionId, setConnectionId] = React.useState<string | null>(null);
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const seenIds = React.useRef<Set<string>>(new Set());
   const publishRef = React.useRef<((text: string) => Promise<PeerChatMessage | undefined>) | null>(null);
   const typingPublishRef = React.useRef<((typing: boolean) => Promise<void>) | null>(null);
   const typingIdleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingThrottleAtRef = React.useRef(0);
-  /** Increments each chat session effect run — drops stale Ably callbacks after Strict Mode remount / Leave. */
   const chatEpochRef = React.useRef(0);
+  const sessionNameRef = React.useRef('');
 
   const appendMessages = React.useCallback((incoming: PeerChatMessage[]): void => {
     setMessages(prev => {
@@ -78,8 +104,8 @@ export function ChatPage(): React.ReactElement {
     });
   }, []);
 
-  /** Always forwards to the latest handler so Ably callbacks never close over a stale StrictMode render. */
   const inboundRelayRef = React.useRef<(msg: PeerChatMessage) => void>(() => {});
+  /* eslint-disable-next-line react-hooks/refs -- assign latest relay without effect churn */
   inboundRelayRef.current = (msg: PeerChatMessage): void => {
     appendMessages([msg]);
     setTypingOthers(prev => prev.filter(n => n !== msg.from));
@@ -114,19 +140,24 @@ export function ChatPage(): React.ReactElement {
   }, [connState]);
 
   React.useEffect(() => {
-    if (!session || !ablyKey) return;
-
+    if (!session || !hasKey) return;
+    sessionNameRef.current = session.name;
     const epoch = ++chatEpochRef.current;
 
     publishRef.current = null;
     typingPublishRef.current = null;
+    setPublishReady(false);
 
     let closed = false;
     let closeSession: (() => void) | undefined;
 
+    /* eslint-disable react-hooks/set-state-in-effect */
     setPresenceMembers([]);
     setLocalClientId(null);
     setPresenceEnabled(false);
+    setChannelName(channelNameForRoom(session.room));
+    setConnectionId(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     void (async (): Promise<void> => {
       try {
@@ -140,7 +171,8 @@ export function ChatPage(): React.ReactElement {
             setConnState(state);
           },
           payload => {
-            if (isSelfMessage(payload.from, session.name)) return;
+            if (closed || epoch !== chatEpochRef.current) return;
+            if (isSelfMessage(payload.from, sessionNameRef.current)) return;
             setTypingOthers(prev => {
               const s = new Set(prev);
               if (payload.typing) s.add(payload.from);
@@ -159,22 +191,27 @@ export function ChatPage(): React.ReactElement {
         }
         setLocalClientId(chat.localClientId);
         setPresenceEnabled(chat.presenceEnabled);
+        setChannelName(chat.channelName);
+        setConnectionId(chat.connectionId);
         publishRef.current = chat.publish;
         typingPublishRef.current = chat.publishTyping;
+        setPublishReady(true);
         closeSession = chat.close;
         peerChatLog('ui', 'session:publish_ready', {
           room: session.room,
           presenceEnabled: chat.presenceEnabled,
-          localClientId: chat.localClientId
+          localClientId: chat.localClientId,
+          channelName: chat.channelName,
+          connectionId: chat.connectionId
         });
       } catch (e: unknown) {
         if (!closed && epoch === chatEpochRef.current) {
           peerChatWarn('ui', 'session:connect_failed', {
             message: e instanceof Error ? e.message : String(e)
           });
-          setMessages([]);
           setJoinError(explainAblyError(e));
           setSession(null);
+          setPublishReady(false);
         }
       }
     })();
@@ -184,17 +221,18 @@ export function ChatPage(): React.ReactElement {
       flushLocalTyping();
       publishRef.current = null;
       typingPublishRef.current = null;
+      setPublishReady(false);
       closeSession?.();
     };
-    // appendMessages is stable (useCallback); omit from deps to avoid extra Ably reconnects in dev.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable appendMessages + intentional epoch guards
-  }, [ablyKey, session, flushLocalTyping]);
+  }, [ablyKey, hasKey, session, relayInbound, flushLocalTyping]);
 
   React.useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [messages, typingOthers]);
+
+  const canSend = Boolean(draft.trim() && connState === 'connected' && publishReady);
 
   const onJoin = (): void => {
     setJoinError(undefined);
@@ -223,20 +261,59 @@ export function ChatPage(): React.ReactElement {
     setPresenceMembers([]);
     setLocalClientId(null);
     setPresenceEnabled(false);
+    setPublishReady(false);
     setConnState('connecting');
     peerChatLog('ui', 'join', { room: parsed.code, name });
     setSession({ room: parsed.code, name });
   };
 
+  const autoJoinedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (autoJoinedRef.current || session || !hasKey) return;
+    const fromLink = (params.get('room') ?? '').trim();
+    if (!fromLink) return;
+    const parsed = normalizeRoomCodeInput(fromLink);
+    if (!parsed.ok) return;
+    const name = nameInput.trim();
+    if (name.length < 1 || name.length > 40) return;
+    autoJoinedRef.current = true;
+    setRoomInput(parsed.code);
+    try {
+      sessionStorage.setItem(DISPLAY_KEY, name);
+    } catch {
+      /* ignore */
+    }
+    seenIds.current = new Set();
+    setMessages([]);
+    setTypingOthers([]);
+    setPresenceMembers([]);
+    setLocalClientId(null);
+    setPresenceEnabled(false);
+    setPublishReady(false);
+    setConnState('connecting');
+    peerChatLog('ui', 'auto-join', { room: parsed.code, name });
+    setSession({ room: parsed.code, name });
+  }, [hasKey, params, nameInput, session]);
+
   const onLeave = (): void => {
     peerChatLog('ui', 'leave');
     flushLocalTyping();
+    clearPeerChatBrowserStorage();
+    try {
+      sessionStorage.removeItem(DISPLAY_KEY);
+    } catch {
+      /* ignore */
+    }
+    setNameInput('');
     setSession(null);
     setMessages([]);
     setTypingOthers([]);
     setPresenceMembers([]);
     setLocalClientId(null);
     setPresenceEnabled(false);
+    setPublishReady(false);
+    setChannelName(null);
+    setConnectionId(null);
     seenIds.current = new Set();
     setConnState(undefined);
     setSendError(undefined);
@@ -247,12 +324,14 @@ export function ChatPage(): React.ReactElement {
     flushLocalTyping();
     const publish = publishRef.current;
     if (!publish) {
-      peerChatLog('ui', 'send:blocked', { reason: 'no_publish_fn', connState });
+      peerChatLog('ui', 'send:blocked', { reason: 'no_publish_fn', connState, publishReady });
       setSendError('Not connected yet.');
       return;
     }
     if (connState !== 'connected') {
       peerChatLog('ui', 'send:blocked', { reason: 'not_connected', connState });
+      setSendError(`Still ${connState ?? 'connecting'} — wait until connected.`);
+      return;
     }
     try {
       peerChatLog('ui', 'send:start', { connState, draftLen: draft.trim().length });
@@ -260,7 +339,6 @@ export function ChatPage(): React.ReactElement {
       if (sent) {
         appendMessages([sent]);
       }
-      /** Echo from Ably is also enabled; `seenIds` dedupes if both arrive. */
       peerChatLog('ui', 'send:ok');
       setDraft('');
     } catch (e: unknown) {
@@ -273,28 +351,12 @@ export function ChatPage(): React.ReactElement {
     return (
       <div className="page-shell">
         <h2>Peer chat</h2>
-        <p>Group chat opens after everyone enters the same room code. This feature needs a realtime service key.</p>
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 8,
-            background: 'var(--social-bg)',
-            border: '1px solid var(--border)',
-            fontSize: 14
-          }}
-        >
+        <p>Group chat opens after everyone enters the same room code. This feature needs a realtime service.</p>
+        <div className="callout callout--muted" style={{ marginTop: 12 }}>
           <p style={{ marginBottom: 8 }}>
-            Add <code>VITE_ABLY_KEY</code> to <code>apps/pwa/.env</code> (see <code>.env.example</code>), restart{' '}
-            <code>npm run dev</code>, then return here.
-          </p>
-          <p style={{ marginBottom: 0 }}>
-            Create a free Ably app at{' '}
-            <a href="https://ably.com/sign-up" target="_blank" rel="noreferrer">
-              ably.com
-            </a>
-            Prefer an API key whose capabilities are limited to subscribe, publish, history, and presence on channels matching{' '}
-            <code>peerpoint:room:*</code> (see Ably docs on key capabilities).
+            Prefer <code>VITE_ABLY_AUTH_URL=/api/ably-token</code> (Cloudflare Function) in production. For local
+            testing, add <code>VITE_ABLY_KEY</code> to <code>apps/pwa/.env</code>, then restart{' '}
+            <code>npm run dev</code>.
           </p>
         </div>
       </div>
@@ -309,12 +371,28 @@ export function ChatPage(): React.ReactElement {
     presenceMembers[0].clientId === localClientId;
 
   if (!session) {
+    const fromEmailLink = Boolean((params.get('room') ?? '').trim());
     return (
       <div className="page-shell page-shell-tight">
         <h2>Peer chat</h2>
-        <p>Everyone enters the same room code to join one conversation. Messages go through Ably (a third-party service), not SharePoint.</p>
-        <p style={{ marginTop: 8, fontSize: 14, color: 'var(--text)' }}>
-          If this is an emergency, call 911. This chat is not a substitute for crisis services.
+        {fromEmailLink ? (
+          <p className="callout callout--muted">
+            Your room code from email is filled in. Enter a display name and join. If you get disconnected later, use
+            the same room code (in your email) to reconnect — codes expire after <strong>24 hours</strong> of no use.
+          </p>
+        ) : (
+          <p className="callout callout--muted">
+            Use the room code from your PEERPoint email (or from staff). Keep it handy to reconnect if you disconnect.
+            Codes expire after <strong>24 hours</strong> of no use.
+          </p>
+        )}
+        <p className="callout callout--privacy">
+        <strong>Privacy.</strong> PEERPoint does not keep or record your messages. Enter the room code and a display
+          name only—no work sign-in. The site access code does not identify you.
+        </p>
+        <p className="lede">
+          If this is an emergency, call 911. This chat is not a substitute for crisis services. For voice with the same
+          code, use <Link to={roomInput ? `/voice?room=${encodeURIComponent(roomInput)}` : '/voice'}>Peer voice</Link>.
         </p>
 
         {joinError && <div style={{ marginTop: 12, color: '#a4262c', whiteSpace: 'pre-wrap' }}>{joinError}</div>}
@@ -331,13 +409,27 @@ export function ChatPage(): React.ReactElement {
             />
           </label>
           <label>
-            Your name (shown in chat)
+            Your display name (shown in chat)
+            <span
+              style={{
+                display: 'block',
+                fontSize: 13,
+                color: '#5c6e66',
+                marginTop: 2,
+                marginBottom: 4,
+                lineHeight: 1.35,
+                fontWeight: 400
+              }}
+            >
+              This can be any name you choose—you don&apos;t have to use your real name.
+            </span>
             <input
               value={nameInput}
               onChange={e => setNameInput(e.target.value)}
-              placeholder="First name or initials"
-              autoComplete="name"
+              placeholder="Nickname or any label"
+              autoComplete="off"
               maxLength={40}
+              autoFocus={fromEmailLink}
             />
           </label>
           <button type="button" onClick={onJoin}>
@@ -348,11 +440,19 @@ export function ChatPage(): React.ReactElement {
     );
   }
 
+  const sendBlockedReason = !draft.trim()
+    ? 'Type a message first'
+    : connState !== 'connected'
+      ? `Wait until connected (now: ${connState ?? 'unknown'})`
+      : !publishReady
+        ? 'Finishing connection…'
+        : 'Send message';
+
   return (
     <div className="peer-chat-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ margin: 0 }}>Room {session.room}</h2>
-        <button type="button" onClick={onLeave}>
+        <button type="button" className="btn-ghost" onClick={onLeave}>
           Leave
         </button>
       </div>
@@ -362,19 +462,30 @@ export function ChatPage(): React.ReactElement {
           <span style={{ marginLeft: 8 }}>· {connState}</span>
         ) : null}
       </div>
+      <p className="callout callout--muted" style={{ marginTop: 8, fontSize: 13 }}>
+        Disconnected? Rejoin with room code <strong>{session.room}</strong> (same code is in your email). Expires after
+        24 hours of no use.
+      </p>
       {connState && connState !== 'connected' ? (
-        <div
-          role="status"
-          style={{
-            fontSize: 14,
-            padding: '10px 12px',
-            borderRadius: 10,
-            background: 'rgba(168, 80, 0, 0.12)',
-            border: '1px solid rgba(168, 80, 0, 0.35)',
-            color: 'var(--text-h)'
-          }}
-        >
-          Connecting to the chat service ({connState}). Send stays off until the link shows connected.
+        <div className="peer-chat-conn-banner" role="status">
+          Connecting to the chat service ({connState}). Send stays off until connected.
+        </div>
+      ) : null}
+
+      {showDebug ? (
+        <div className="peer-chat-debug" aria-label="Chat connection debug">
+          <div>
+            <strong>channel</strong> {channelName ?? '—'}
+          </div>
+          <div>
+            <strong>connection</strong> {connectionId ?? '—'} · <strong>state</strong> {connState ?? '—'}
+          </div>
+          <div>
+            <strong>clientId</strong> {localClientId ?? '—'} · <strong>publishReady</strong> {String(publishReady)}
+          </div>
+          <div>
+            <strong>messages</strong> {messages.length} · <strong>presence</strong> {presenceMembers.length}
+          </div>
         </div>
       ) : null}
 
@@ -390,8 +501,7 @@ export function ChatPage(): React.ReactElement {
           <>
             <p className="peer-chat-roster-status">
               You are in this room as <strong>{session.name}</strong>. Others who join the same room code will appear here
-              when your Ably API key allows <strong>Presence</strong> on channels like{' '}
-              <code className="peer-chat-roster-code">peerpoint:room:*</code>.
+              when Presence is enabled on your Ably key.
             </p>
             <ul className="peer-chat-roster-list">
               <li>
@@ -426,9 +536,12 @@ export function ChatPage(): React.ReactElement {
         {messages.length === 0 && <div style={{ color: 'var(--text)', fontSize: 14 }}>No messages yet. Say hello.</div>}
         {messages.map(m => {
           const self = isSelfMessage(m.from, session.name);
+          const tone = bubbleToneIndex(m.from);
           return (
             <div key={m.id} className={self ? 'peer-chat-row peer-chat-row--self' : 'peer-chat-row peer-chat-row--other'}>
-              <div className={self ? 'peer-chat-bubble peer-chat-bubble--self' : 'peer-chat-bubble peer-chat-bubble--other'}>
+              <div
+                className={`peer-chat-bubble peer-chat-bubble--tone-${tone} ${self ? 'peer-chat-bubble--mine' : 'peer-chat-bubble--theirs'}`}
+              >
                 {!self && <div className="peer-chat-bubble-name">{m.from}</div>}
                 <div className="peer-chat-bubble-text">{m.text}</div>
                 <div className="peer-chat-bubble-meta">{formatTime(m.at)}</div>
@@ -481,14 +594,8 @@ export function ChatPage(): React.ReactElement {
           type="button"
           className="peer-chat-send"
           onClick={() => void onSend()}
-          disabled={!draft.trim() || connState !== 'connected'}
-          title={
-            !draft.trim()
-              ? 'Type a message first'
-              : connState !== 'connected'
-                ? `Wait until connected (now: ${connState ?? 'unknown'})`
-                : 'Send message'
-          }
+          disabled={!canSend}
+          title={sendBlockedReason}
         >
           Send
         </button>

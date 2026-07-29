@@ -18,16 +18,24 @@ Use this when local or deployed behavior does not match expectations. **Never pa
 
 ## Peer chat (Ably)
 
+- If **typing indicators work** but **chat text does not**, the Ably link is fine; check the browser console (filter `[PeerChat]`) for `recv:peer_msg:skipped_invalid_payload` — that means the message body did not match the expected shape (`id`, `from`, `text`). Use different display names for each participant when testing.
 - **Channel names** in code are `peerpoint:room:{ROOMCODE}` (normalized uppercase alphanumeric room codes).
 - **API key capabilities** for that channel pattern must include at least **publish**, **subscribe**, **history** (app loads history on join), and **presence** if you want the “people in this room” roster.
 - **Isolate key vs app issues:** temporarily use an unrestricted “root” Ably key in `.env`; if chat works, tighten capabilities again on a restricted key.
 
 ### Browser console (development)
 
-Filter dev logs:
+Filter logs:
 
 - **`[PeerChat]`** — Ably session (connect, publish, receive, presence).
 - **`[PeerChat UI]`** — React UI (join, send, message append).
+
+**When logs run**
+
+- **`npm run dev`**: logging is **on** by default (no extra env needed).
+- **Production / preview**: set `VITE_PEER_CHAT_DEBUG=true` in `.env` and rebuild, **or** in the browser console run `localStorage.setItem('peerpoint_chat_debug', '1')` and refresh — no rebuild.
+
+Problems such as invalid incoming payloads appear as **`[PeerChat] recv:peer_msg:skipped_invalid_payload`** (warning level).
 
 If sends fail, expand the error under the Send button and note the message text **without** secrets.
 

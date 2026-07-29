@@ -1,5 +1,6 @@
 import * as Ably from 'ably';
 import type { Message, PresenceMessage } from 'ably';
+import { resolveAblyClientOptions } from './ablyAuth';
 import type { PeerChatMessage, PeerPresenceMember, PeerTypingPayload } from '../types/chat';
 import { isPeerChatDebugEnabled, peerChatLog, peerChatWarn } from './peerChatDebugLog';
 
@@ -141,8 +142,11 @@ function parseTypingPayload(data: unknown): PeerTypingPayload | null {
 export type AblyChatSession = {
   localClientId: string;
   presenceEnabled: boolean;
+  channelName: string;
+  connectionId: string | null;
   publish: (text: string) => Promise<PeerChatMessage | undefined>;
   publishTyping: (typing: boolean) => Promise<void>;
+  /** Release one holder. Closes the Realtime client only when the last holder releases (Strict Mode safe). */
   close: () => void;
 };
 
@@ -195,11 +199,16 @@ function newMessageId(): string {
 
 const ABLY_CLIENT_ID_STORAGE_KEY = 'peerpoint_ably_client_id';
 
-/**
- * Ably requires a clientId for presence; some auth paths omit it. Persist one per tab
- * so reconnects stay stable.
- */
-function stableBrowserTabClientId(): string {
+export function clearPeerChatBrowserStorage(): void {
+  try {
+    sessionStorage.removeItem(ABLY_CLIENT_ID_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Shared per-tab id for Ably `clientId` (chat + voice). */
+export function stableBrowserTabClientId(): string {
   try {
     const existing = sessionStorage.getItem(ABLY_CLIENT_ID_STORAGE_KEY);
     if (
@@ -225,13 +234,13 @@ async function waitForRealtimeConnected(client: Ably.Realtime): Promise<void> {
   const initial = client.connection.state;
   if (initial === 'connected') return;
   if (initial === 'failed' || initial === 'closed') {
-    throw new Error('Ably connection cannot start (already failed or closed). Check VITE_ABLY_KEY.');
+    throw new Error('Ably connection cannot start (already failed or closed). Check VITE_ABLY_KEY or VITE_ABLY_AUTH_URL.');
   }
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error('Timed out waiting for Ably (20s). Check network and VITE_ABLY_KEY.'));
+      reject(new Error('Timed out waiting for Ably (20s). Check network and Ably auth.'));
     }, 20_000);
 
     const cleanup = (): void => {
@@ -260,46 +269,74 @@ async function waitForRealtimeConnected(client: Ably.Realtime): Promise<void> {
   });
 }
 
-export async function connectPeerChat(
-  apiKey: string,
+type SessionCallbacks = {
+  onMessage: (msg: PeerChatMessage) => void;
+  onConnectionState?: (state: Ably.ConnectionState) => void;
+  onTyping?: (payload: PeerTypingPayload) => void;
+  onPresence?: (members: PeerPresenceMember[]) => void;
+};
+
+type ManagedChat = {
+  mapKey: string;
+  roomCode: string;
+  displayName: string;
+  refCount: number;
+  client: Ably.Realtime;
+  channel: Ably.RealtimeChannel;
+  channelName: string;
+  localClientId: string;
+  presenceEnabled: boolean;
+  callbacks: SessionCallbacks;
+  dispose: () => void;
+};
+
+/** Survives React Strict Mode remounts: one Ably client per tab+room until last release. */
+const liveChats = new Map<string, ManagedChat>();
+
+function mapKeyFor(roomCode: string, clientId: string): string {
+  return `${roomCode}::${clientId}`;
+}
+
+async function createManagedChat(
+  apiKey: string | undefined,
   roomCode: string,
   displayName: string,
-  onMessage: (msg: PeerChatMessage) => void,
-  onConnectionState?: (state: Ably.ConnectionState) => void,
-  onTyping?: (payload: PeerTypingPayload) => void,
-  onPresence?: (members: PeerPresenceMember[]) => void
-): Promise<AblyChatSession> {
-  const key = sanitizeAblyApiKey(apiKey);
+  callbacks: SessionCallbacks
+): Promise<ManagedChat> {
   const chanName = channelNameForRoom(roomCode);
+  const fallbackName = displayName.trim() || 'Anonymous';
+  const tabClientId = stableBrowserTabClientId();
+  const mapKey = mapKeyFor(roomCode, tabClientId);
+
   peerChatLog('ably', 'connect:start', {
     channel: chanName,
     roomCode,
-    displayName: displayName.trim() || 'Anonymous'
+    displayName: fallbackName,
+    mapKey
   });
 
-  if (!isPlausibleAblyApiKey(key)) {
-    throw new Error(
-      'Ably API key looks incomplete or wrong. Copy the full key from Ably (format like xxx.yyy:secret), one line, no quotes — then fix apps/pwa/.env and restart npm run dev.'
+  let client: Ably.Realtime;
+  try {
+    client = new Ably.Realtime(
+      resolveAblyClientOptions({
+        roomCode,
+        clientId: tabClientId,
+        apiKey,
+        echoMessages: false
+      })
     );
+  } catch (e) {
+    throw e instanceof Error ? e : new Error(String(e));
   }
 
-  const fallbackName = displayName.trim() || 'Anonymous';
-
-  const client = new Ably.Realtime({
-    key,
-    clientId: stableBrowserTabClientId(),
-    echoMessages: false,
-    ...(isPeerChatDebugEnabled()
-      ? {
-          logLevel: 2,
-          logHandler: (msg: string): void => {
-            if (/message|protocol|subscribe|publish|peer_msg|peerpoint/i.test(msg)) {
-              peerChatLog('ably', 'protocol', { line: msg.slice(0, 300) });
-            }
-          }
-        }
-      : {})
-  });
+  if (isPeerChatDebugEnabled()) {
+    try {
+      // Best-effort verbose protocol logging when Ably supports it.
+      (client as unknown as { logger?: { logLevel?: number } }).logger;
+    } catch {
+      /* ignore */
+    }
+  }
 
   const onConn = (change: Ably.ConnectionStateChange): void => {
     const reason =
@@ -311,28 +348,56 @@ export async function connectPeerChat(
     peerChatLog('ably', 'connection', {
       previous: change.previous,
       current: change.current,
+      connectionId: client.connection.id ?? null,
       ...(reason ? { reason } : {})
     });
-    onConnectionState?.(change.current);
+    managed.callbacks.onConnectionState?.(change.current);
   };
+
+  const managed: ManagedChat = {
+    mapKey,
+    roomCode,
+    displayName: fallbackName,
+    refCount: 1,
+    client,
+    channel: null as unknown as Ably.RealtimeChannel,
+    channelName: chanName,
+    localClientId: tabClientId,
+    presenceEnabled: false,
+    callbacks,
+    dispose: () => {
+      /* filled below */
+    }
+  };
+
   client.connection.on(onConn);
 
-  peerChatLog('ably', 'connection:initial', { state: client.connection.state });
+  try {
+    await waitForRealtimeConnected(client);
+  } catch (e) {
+    client.connection.off(onConn);
+    client.close();
+    throw e;
+  }
 
-  await waitForRealtimeConnected(client);
-  peerChatLog('ably', 'connection:ready', { state: client.connection.state });
+  peerChatLog('ably', 'connection:ready', {
+    state: client.connection.state,
+    connectionId: client.connection.id ?? null
+  });
 
   const channel = client.channels.get(chanName);
-
+  managed.channel = channel;
   await channel.attach();
+  peerChatLog('ably', 'channel:attach', { name: chanName, state: channel.state });
 
   const onChatInbound = (m: Message): void => {
     peerChatLog('ably', 'raw_inbound', {
       event: PEER_CHAT_EVENT,
       name: m.name ?? '(none)',
+      connectionId: m.connectionId,
+      channel: chanName,
       dataType: m.data === null || m.data === undefined ? 'nullish' : typeof m.data
     });
-
     const normalized = normalizePeerChatPayload(m.data);
     if (normalized) {
       peerChatLog('ably', 'recv:peer_msg', {
@@ -341,7 +406,7 @@ export async function connectPeerChat(
         textLen: normalized.text.length,
         connectionId: m.connectionId
       });
-      onMessage(normalized);
+      managed.callbacks.onMessage(normalized);
     } else {
       peerChatWarn('ably', 'recv:peer_msg:skipped_invalid_payload', {
         messageEventName: m.name,
@@ -358,105 +423,120 @@ export async function connectPeerChat(
   };
 
   const onTypingInbound = (m: Message): void => {
-    peerChatLog('ably', 'raw_inbound', {
-      event: PEER_TYPING_EVENT,
-      name: m.name ?? '(none)',
-      dataType: m.data === null || m.data === undefined ? 'nullish' : typeof m.data
-    });
-    if (!onTyping) return;
     const typing = parseTypingPayload(m.data);
     if (typing) {
       peerChatLog('ably', 'recv:peer_typing', { from: typing.from, typing: typing.typing });
-      onTyping(typing);
+      managed.callbacks.onTyping?.(typing);
     }
   };
 
-  /** Two explicit named subscriptions (Ably FAQ: event name must match publish exactly). */
+  const onCatchAll = (m: Message): void => {
+    if (m.name === PEER_CHAT_EVENT || m.name === PEER_TYPING_EVENT) return;
+    peerChatLog('ably', 'catch_all_inbound', {
+      name: m.name ?? '(none)',
+      channel: chanName
+    });
+  };
+
   await channel.subscribe(PEER_CHAT_EVENT, onChatInbound);
   peerChatLog('ably', 'subscribe', { event: PEER_CHAT_EVENT });
-  if (onTyping) {
-    await channel.subscribe(PEER_TYPING_EVENT, onTypingInbound);
-    peerChatLog('ably', 'subscribe', { event: PEER_TYPING_EVENT });
+  await channel.subscribe(PEER_TYPING_EVENT, onTypingInbound);
+  peerChatLog('ably', 'subscribe', { event: PEER_TYPING_EVENT });
+  if (isPeerChatDebugEnabled()) {
+    await channel.subscribe(onCatchAll);
+    peerChatLog('ably', 'subscribe', { event: '(catch-all)' });
   }
 
-  try {
-    const page = await channel.history({ direction: 'backwards', limit: 50 });
-    peerChatLog('ably', 'history:loaded', { count: page.items.length });
-    for (const item of page.items) {
-      if (item.name !== PEER_CHAT_EVENT) continue;
-      const normalized = normalizePeerChatPayload(item.data);
-      if (normalized) onMessage(normalized);
-    }
-  } catch (e: unknown) {
-    peerChatWarn('ably', 'history:error', {
-      message: e instanceof Error ? e.message : String(e)
-    });
-  }
-
-  let presenceEnabled = false;
   let presenceUnsub: (() => void) | undefined;
-
   const pushRoster = async (): Promise<void> => {
-    if (!presenceEnabled || !onPresence) return;
+    if (!managed.presenceEnabled || !managed.callbacks.onPresence) return;
     try {
       const members = await channel.presence.get();
-      onPresence(rosterFromPresenceMessages(members, fallbackName));
+      managed.callbacks.onPresence(rosterFromPresenceMessages(members, managed.displayName));
     } catch {
       /* ignore */
     }
   };
 
-  if (onPresence) {
-    try {
-      await channel.presence.enter({ name: fallbackName });
-      presenceEnabled = true;
-      peerChatLog('ably', 'presence:enter', { ok: true });
-      await pushRoster();
-      const subHandler = (): void => {
-        void pushRoster();
-      };
-      channel.presence.subscribe(subHandler);
-      presenceUnsub = (): void => {
-        channel.presence.unsubscribe(subHandler);
-      };
-    } catch (e: unknown) {
-      presenceEnabled = false;
-      peerChatWarn('ably', 'presence:enter', {
-        ok: false,
-        message: e instanceof Error ? e.message : String(e)
-      });
-    }
+  try {
+    await channel.presence.enter({ name: fallbackName });
+    managed.presenceEnabled = true;
+    peerChatLog('ably', 'presence:enter', { ok: true });
+    await pushRoster();
+    const subHandler = (): void => {
+      void pushRoster();
+    };
+    channel.presence.subscribe(subHandler);
+    presenceUnsub = (): void => {
+      channel.presence.unsubscribe(subHandler);
+    };
+  } catch (e: unknown) {
+    managed.presenceEnabled = false;
+    peerChatWarn('ably', 'presence:enter', {
+      ok: false,
+      message: e instanceof Error ? e.message : String(e)
+    });
   }
 
-  const localClientId =
+  managed.localClientId =
     (typeof client.auth.clientId === 'string' && client.auth.clientId.trim() !== ''
       ? client.auth.clientId.trim()
-      : client.connection.id) || '';
+      : client.connection.id) || tabClientId;
+
+  managed.dispose = (): void => {
+    peerChatLog('ably', 'session:dispose', { mapKey, channel: chanName });
+    client.connection.off(onConn);
+    channel.unsubscribe(PEER_CHAT_EVENT, onChatInbound);
+    channel.unsubscribe(PEER_TYPING_EVENT, onTypingInbound);
+    if (isPeerChatDebugEnabled()) {
+      channel.unsubscribe(onCatchAll);
+    }
+    presenceUnsub?.();
+    const shutdown = (): void => {
+      client.close();
+    };
+    if (managed.presenceEnabled) {
+      void channel.presence.leave().then(shutdown).catch(shutdown);
+    } else {
+      shutdown();
+    }
+  };
 
   peerChatLog('ably', 'connect:ready', {
     connectionState: client.connection.state,
     channelState: channel.state,
-    presenceEnabled,
-    localClientId,
-    authClientId: client.auth.clientId ?? null
+    presenceEnabled: managed.presenceEnabled,
+    localClientId: managed.localClientId,
+    connectionId: client.connection.id ?? null
   });
-  onConnectionState?.(client.connection.state);
+  managed.callbacks.onConnectionState?.(client.connection.state);
 
+  return managed;
+}
+
+function wrapManaged(managed: ManagedChat): AblyChatSession {
+  let released = false;
   return {
-    localClientId,
-    presenceEnabled,
+    localClientId: managed.localClientId,
+    presenceEnabled: managed.presenceEnabled,
+    channelName: managed.channelName,
+    connectionId: managed.client.connection.id ?? null,
     publish: async (text: string): Promise<PeerChatMessage | undefined> => {
       const trimmed = text.trim();
       if (!trimmed) return undefined;
       const msg: PeerChatMessage = {
         id: newMessageId(),
-        from: fallbackName,
+        from: managed.displayName,
         text: trimmed,
         at: Date.now()
       };
-      peerChatLog('ably', 'publish:peer_msg', { id: msg.id, textLen: trimmed.length });
+      peerChatLog('ably', 'publish:peer_msg', {
+        id: msg.id,
+        textLen: trimmed.length,
+        channel: managed.channelName
+      });
       try {
-        await channel.publish(PEER_CHAT_EVENT, msg);
+        await managed.channel.publish(PEER_CHAT_EVENT, msg);
         peerChatLog('ably', 'publish:peer_msg:ok', { id: msg.id });
         return msg;
       } catch (e: unknown) {
@@ -468,9 +548,9 @@ export async function connectPeerChat(
       }
     },
     publishTyping: async (typing: boolean): Promise<void> => {
-      const payload: PeerTypingPayload = { from: fallbackName, typing };
+      const payload: PeerTypingPayload = { from: managed.displayName, typing };
       try {
-        await channel.publish(PEER_TYPING_EVENT, payload);
+        await managed.channel.publish(PEER_TYPING_EVENT, payload);
       } catch (e: unknown) {
         peerChatWarn('ably', 'publish:peer_typing:error', {
           message: e instanceof Error ? e.message : String(e)
@@ -478,21 +558,77 @@ export async function connectPeerChat(
       }
     },
     close: (): void => {
-      peerChatLog('ably', 'session:close');
-      client.connection.off(onConn);
-      channel.unsubscribe(PEER_CHAT_EVENT, onChatInbound);
-      if (onTyping) {
-        channel.unsubscribe(PEER_TYPING_EVENT, onTypingInbound);
-      }
-      presenceUnsub?.();
-      const shutdown = (): void => {
-        client.close();
-      };
-      if (presenceEnabled) {
-        void channel.presence.leave().then(shutdown).catch(shutdown);
-      } else {
-        shutdown();
+      if (released) return;
+      released = true;
+      managed.refCount -= 1;
+      peerChatLog('ably', 'session:release', { mapKey: managed.mapKey, refCount: managed.refCount });
+      if (managed.refCount <= 0) {
+        liveChats.delete(managed.mapKey);
+        managed.dispose();
       }
     }
   };
+}
+
+/**
+ * Join (or re-attach to) a peer chat room. Safe under React Strict Mode:
+ * remount reuses the same Ably connection instead of open/close thrash.
+ */
+export async function connectPeerChat(
+  apiKey: string | undefined,
+  roomCode: string,
+  displayName: string,
+  onMessage: (msg: PeerChatMessage) => void,
+  onConnectionState?: (state: Ably.ConnectionState) => void,
+  onTyping?: (payload: PeerTypingPayload) => void,
+  onPresence?: (members: PeerPresenceMember[]) => void
+): Promise<AblyChatSession> {
+  const tabClientId = stableBrowserTabClientId();
+  const key = mapKeyFor(roomCode, tabClientId);
+  const callbacks: SessionCallbacks = {
+    onMessage,
+    onConnectionState,
+    onTyping,
+    onPresence
+  };
+
+  const existing = liveChats.get(key);
+  if (existing && existing.client.connection.state !== 'closed' && existing.client.connection.state !== 'failed') {
+    existing.refCount += 1;
+    existing.displayName = displayName.trim() || 'Anonymous';
+    existing.callbacks = callbacks;
+    peerChatLog('ably', 'session:reuse', {
+      mapKey: key,
+      refCount: existing.refCount,
+      connectionState: existing.client.connection.state
+    });
+    existing.callbacks.onConnectionState?.(existing.client.connection.state);
+    if (existing.presenceEnabled) {
+      try {
+        await existing.channel.presence.update({ name: existing.displayName });
+      } catch {
+        /* ignore */
+      }
+      try {
+        const members = await existing.channel.presence.get();
+        existing.callbacks.onPresence?.(rosterFromPresenceMessages(members, existing.displayName));
+      } catch {
+        /* ignore */
+      }
+    }
+    return wrapManaged(existing);
+  }
+
+  if (existing) {
+    liveChats.delete(key);
+    try {
+      existing.dispose();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const managed = await createManagedChat(apiKey, roomCode, displayName, callbacks);
+  liveChats.set(managed.mapKey, managed);
+  return wrapManaged(managed);
 }

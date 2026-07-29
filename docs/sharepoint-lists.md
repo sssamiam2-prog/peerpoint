@@ -1,6 +1,8 @@
 # SharePoint Lists (MVP schema)
 
-This app uses **SharePoint lists** as the database layer (not Cloudflare D1 or other external SQL). The PWA talks to these lists through **Microsoft Graph** using IDs in `apps/pwa/.env`; the SPFx web part uses the same lists by **list title** via REST.
+> **Current PWA (`apps/pwa`)** does not use SharePoint or Graph. This document and the provisioning script apply to the **SPFx** solution (`peer-support-app`) if you bring that path back or host the web part in SharePoint.
+
+This schema uses **SharePoint lists** as the data layer (not Cloudflare D1). The SPFx web part uses these lists by **list title** via REST.
 
 **Automated provisioning:** run [`scripts/Create-PeerPointSharePointLists.ps1`](../scripts/Create-PeerPointSharePointLists.ps1) from PowerShell (see script help). You must supply your **SharePoint site URL** and sign in as someone who can create lists.
 

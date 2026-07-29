@@ -1,0 +1,34 @@
+# Pings PEERPoint every 30 minutes so Unavailable staff get reminder emails.
+#
+# Secrets:
+#   CRON_SECRET — same value as Cloudflare Pages env CRON_SECRET
+# Optional var:
+#   PEERPOINT_CRON_URL — defaults to https://mypeerpoint.com/api/cron/availability-reminders
+
+name: Availability reminder cron
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sweep unavailable reminders
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PEERPOINT_CRON_URL: ${{ vars.PEERPOINT_CRON_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET not set — skip"
+            exit 0
+          fi
+          URL="${PEERPOINT_CRON_URL:-https://mypeerpoint.com/api/cron/availability-reminders}"
+          curl -fsS -X POST "$URL" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json"
