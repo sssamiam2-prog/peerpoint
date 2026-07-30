@@ -1,9 +1,10 @@
 import * as React from 'react';
 import {
-  isMemberAccessUnlocked,
+  clearMemberAccessUnlock,
   unlockMemberAccess,
   verifySiteUseCode
 } from '../lib/memberAccess';
+import { isStandaloneDisplay } from '../lib/pwaInstall';
 
 type Props = {
   children: React.ReactNode;
@@ -12,14 +13,41 @@ type Props = {
 /**
  * Soft gate for the public member app: shared workplace site use code only.
  * Shows a blocking modal over a greyed-out app shell until the code is entered.
- * Codes are checked on the server — they are not embedded in this page’s source.
+ * Required on every fresh open — including when PEERPoint is installed on a phone.
  */
 export function MemberAccessGate(props: Props): React.ReactElement {
-  const [unlocked, setUnlocked] = React.useState(() => isMemberAccessUnlocked());
+  const [unlocked, setUnlocked] = React.useState(false);
   const [code, setCode] = React.useState('');
   const [error, setError] = React.useState<string | undefined>();
   const [busy, setBusy] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    // Wipe any leftover unlock from a prior PWA/browser session.
+    clearMemberAccessUnlock();
+    setUnlocked(false);
+
+    const relock = (): void => {
+      clearMemberAccessUnlock();
+      setUnlocked(false);
+      setCode('');
+      setError(undefined);
+    };
+
+    // bfcache restore (common when reopening an installed PWA)
+    const onPageShow = (e: PageTransitionEvent): void => {
+      if (e.persisted) relock();
+    };
+
+    // If the installed app was backgrounded then fully restarted via pageshow without persist,
+    // React already remounted. Also relock when returning to a standalone app after a long hide
+    // is too aggressive for quick app-switching — only cold start + bfcache above.
+
+    window.addEventListener('pageshow', onPageShow);
+    return (): void => {
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (unlocked) return;
@@ -72,7 +100,8 @@ export function MemberAccessGate(props: Props): React.ReactElement {
         >
           <h2 id="member-access-title">PEERPoint access</h2>
           <p id="member-access-desc" className="member-access-modal__lede">
-            This app is for current Salt Lake County Sheriff’s Office employees. Enter the site use code to continue.
+            This app is for current Salt Lake County Sheriff’s Office employees. Enter the site use code to continue
+            {isStandaloneDisplay() ? ' (required each time you open the app).' : '.'}
           </p>
           <p className="callout callout--privacy member-access-modal__privacy">
             <strong>Privacy.</strong> PEERPoint does not keep or record your chat or voice. The access code is an

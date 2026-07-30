@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ConversationDestroyOverlay } from '../components/ConversationDestroyOverlay';
 import { hasAblyAuthConfigured } from '../lib/ablyAuth';
 import {
   channelNameForRoom,
@@ -78,7 +79,9 @@ export function ChatPage(): React.ReactElement {
   const [publishReady, setPublishReady] = React.useState(false);
   const [channelName, setChannelName] = React.useState<string | null>(null);
   const [connectionId, setConnectionId] = React.useState<string | null>(null);
+  const [destroying, setDestroying] = React.useState(false);
   const listRef = React.useRef<HTMLDivElement | null>(null);
+  const composerRef = React.useRef<HTMLTextAreaElement | null>(null);
   const seenIds = React.useRef<Set<string>>(new Set());
   const publishRef = React.useRef<((text: string) => Promise<PeerChatMessage | undefined>) | null>(null);
   const typingPublishRef = React.useRef<((typing: boolean) => Promise<void>) | null>(null);
@@ -86,6 +89,14 @@ export function ChatPage(): React.ReactElement {
   const typingThrottleAtRef = React.useRef(0);
   const chatEpochRef = React.useRef(0);
   const sessionNameRef = React.useRef('');
+
+  const resizeComposer = React.useCallback((): void => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxPx = 104; /* ~4 lines */
+    el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`;
+  }, []);
 
   const appendMessages = React.useCallback((incoming: PeerChatMessage[]): void => {
     setMessages(prev => {
@@ -232,6 +243,10 @@ export function ChatPage(): React.ReactElement {
     el.scrollTop = el.scrollHeight;
   }, [messages, typingOthers]);
 
+  React.useEffect(() => {
+    resizeComposer();
+  }, [draft, resizeComposer]);
+
   const canSend = Boolean(draft.trim() && connState === 'connected' && publishReady);
 
   const onJoin = (): void => {
@@ -274,7 +289,13 @@ export function ChatPage(): React.ReactElement {
     if (!fromLink) return;
     const parsed = normalizeRoomCodeInput(fromLink);
     if (!parsed.ok) return;
-    const name = nameInput.trim();
+    // Email/SMS join links should enter chat immediately (default display name if needed).
+    const fromJoin = params.get('from') === 'join';
+    let name = nameInput.trim();
+    if (!name && fromJoin) {
+      name = 'Member';
+      setNameInput(name);
+    }
     if (name.length < 1 || name.length > 40) return;
     autoJoinedRef.current = true;
     setRoomInput(parsed.code);
@@ -291,11 +312,11 @@ export function ChatPage(): React.ReactElement {
     setPresenceEnabled(false);
     setPublishReady(false);
     setConnState('connecting');
-    peerChatLog('ui', 'auto-join', { room: parsed.code, name });
+    peerChatLog('ui', 'auto-join', { room: parsed.code, name, fromJoin });
     setSession({ room: parsed.code, name });
   }, [hasKey, params, nameInput, session]);
 
-  const onLeave = (): void => {
+  const finishLeave = React.useCallback((): void => {
     peerChatLog('ui', 'leave');
     flushLocalTyping();
     clearPeerChatBrowserStorage();
@@ -317,6 +338,12 @@ export function ChatPage(): React.ReactElement {
     seenIds.current = new Set();
     setConnState(undefined);
     setSendError(undefined);
+    setDestroying(false);
+  }, [flushLocalTyping]);
+
+  const onLeave = (): void => {
+    if (destroying) return;
+    setDestroying(true);
   };
 
   const onSend = async (): Promise<void> => {
@@ -448,27 +475,36 @@ export function ChatPage(): React.ReactElement {
         ? 'Finishing connection…'
         : 'Send message';
 
+  const connected = connState === 'connected';
+  const voiceHref = `/voice?room=${encodeURIComponent(session.room)}`;
+
   return (
-    <div className="peer-chat-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
-        <h2 style={{ margin: 0 }}>Room {session.room}</h2>
-        <button type="button" className="btn-ghost" onClick={onLeave}>
-          Leave
-        </button>
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--text)' }}>
-        Signed in as <strong>{session.name}</strong>
-        {connState && connState !== 'connected' ? (
-          <span style={{ marginLeft: 8 }}>· {connState}</span>
-        ) : null}
-      </div>
-      <p className="callout callout--muted" style={{ marginTop: 8, fontSize: 13 }}>
-        Disconnected? Rejoin with room code <strong>{session.room}</strong> (same code is in your email). Expires after
-        24 hours of no use.
-      </p>
-      {connState && connState !== 'connected' ? (
+    <div className="peer-chat-page peer-chat-page--session">
+      {destroying ? <ConversationDestroyOverlay onComplete={finishLeave} /> : null}
+      <header className="peer-chat-toolbar">
+        <div className="peer-chat-toolbar__left">
+          <h2 className="peer-chat-toolbar__title">Room {session.room}</h2>
+          <span
+            className={`peer-chat-conn-pill${connected ? ' peer-chat-conn-pill--ok' : ' peer-chat-conn-pill--warn'}`}
+            role="status"
+          >
+            {connected ? 'Connected' : connState ?? 'Connecting…'}
+          </span>
+        </div>
+        <div className="peer-chat-toolbar__actions">
+          <Link className="peer-chat-toolbar__link" to={voiceHref}>
+            Switch to voice
+          </Link>
+          <button type="button" className="btn-ghost" onClick={onLeave} disabled={destroying}>
+            Leave
+          </button>
+        </div>
+      </header>
+
+      {!connected ? (
         <div className="peer-chat-conn-banner" role="status">
-          Connecting to the chat service ({connState}). Send stays off until connected.
+          Connecting… Send stays off until ready. Rejoin later with room code <strong>{session.room}</strong> (also in
+          your email; expires after 24 hours of no use).
         </div>
       ) : null}
 
@@ -489,51 +525,33 @@ export function ChatPage(): React.ReactElement {
         </div>
       ) : null}
 
-      <section className="peer-chat-roster-panel" aria-labelledby="peer-chat-roster-title">
-        <h3 id="peer-chat-roster-title" className="peer-chat-roster-title">
-          People in this room
-        </h3>
+      <div className="peer-chat-presence-strip" aria-live="polite" aria-label="People in this room">
+        <span className="peer-chat-presence-strip__label">In room</span>
         {connState !== 'connected' ? (
-          <p className="peer-chat-roster-status" role="status">
-            Connecting… you’ll see who else is here once the link is ready.
-          </p>
+          <span className="peer-chat-presence-waiting">Connecting…</span>
         ) : !presenceEnabled ? (
-          <>
-            <p className="peer-chat-roster-status">
-              You are in this room as <strong>{session.name}</strong>. Others who join the same room code will appear here
-              when Presence is enabled on your Ably key.
-            </p>
-            <ul className="peer-chat-roster-list">
-              <li>
-                <span className="peer-chat-roster-name">{session.name}</span>{' '}
-                <span className="peer-chat-roster-you">(you)</span>
-              </li>
-            </ul>
-          </>
+          <span className="peer-chat-chip peer-chat-chip--you">
+            {session.name}
+            <span className="peer-chat-chip__you">(you)</span>
+          </span>
         ) : (
           <>
-            {aloneInRoom ? (
-              <p className="peer-chat-roster-standby" role="status">
-                Standby — waiting for someone else to join this room with the same code.
-              </p>
-            ) : null}
-            <ul className="peer-chat-roster-list" aria-live="polite">
-              {presenceMembers.map(m => {
-                const isYou = localClientId !== null && m.clientId === localClientId;
-                return (
-                  <li key={m.clientId}>
-                    <span className="peer-chat-roster-name">{m.name}</span>
-                    {isYou ? <span className="peer-chat-roster-you"> (you)</span> : null}
-                  </li>
-                );
-              })}
-            </ul>
+            {presenceMembers.map(m => {
+              const isYou = localClientId !== null && m.clientId === localClientId;
+              return (
+                <span key={m.clientId} className={`peer-chat-chip${isYou ? ' peer-chat-chip--you' : ''}`}>
+                  {m.name}
+                  {isYou ? <span className="peer-chat-chip__you">(you)</span> : null}
+                </span>
+              );
+            })}
+            {aloneInRoom ? <span className="peer-chat-presence-waiting">Waiting for someone else…</span> : null}
           </>
         )}
-      </section>
+      </div>
 
       <div ref={listRef} className="peer-chat-scroll">
-        {messages.length === 0 && <div style={{ color: 'var(--text)', fontSize: 14 }}>No messages yet. Say hello.</div>}
+        {messages.length === 0 ? <div className="peer-chat-empty">No messages yet. Say hello.</div> : null}
         {messages.map(m => {
           const self = isSelfMessage(m.from, session.name);
           const tone = bubbleToneIndex(m.from);
@@ -564,19 +582,21 @@ export function ChatPage(): React.ReactElement {
         ) : null}
       </div>
 
-      {sendError && <div style={{ color: '#a4262c', fontSize: 14 }}>{sendError}</div>}
+      {sendError ? <div style={{ color: '#a4262c', fontSize: 13, flexShrink: 0 }}>{sendError}</div> : null}
 
       <div className="peer-chat-composer-row">
-        <label className="peer-chat-composer-field">
-          Message
+        <div className="peer-chat-composer-field">
           <textarea
+            ref={composerRef}
             className="peer-chat-composer"
-            rows={5}
+            rows={1}
             value={draft}
+            aria-label="Message"
             onChange={e => {
               setDraft(e.target.value);
               pingLocalTyping();
             }}
+            onInput={resizeComposer}
             onBlur={() => {
               flushLocalTyping();
             }}
@@ -589,7 +609,7 @@ export function ChatPage(): React.ReactElement {
             placeholder="Type a message…"
             autoComplete="off"
           />
-        </label>
+        </div>
         <button
           type="button"
           className="peer-chat-send"

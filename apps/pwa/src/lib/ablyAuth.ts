@@ -64,3 +64,23 @@ export function hasAblyAuthConfigured(apiKey?: string): boolean {
   if (apiKey && isPlausibleAblyApiKey(sanitizeAblyApiKey(apiKey))) return true;
   return false;
 }
+
+/**
+ * Token auth for an assigned peer-support session.
+ * Staff tokens deliberately use `staffToken` in the URL because Ably's authUrl
+ * requests cannot reliably attach a browser Authorization header. The API must
+ * treat it as a short-lived credential and never log query strings.
+ */
+export function resolveModernAblyOptions(opts: {
+  requestId: string;
+  sessionToken?: string;
+  staffToken?: string;
+  clientId: string;
+}): Ably.ClientOptions {
+  const url = new URL('/api/ably-token', window.location.origin);
+  url.searchParams.set('requestId', opts.requestId);
+  url.searchParams.set('clientId', opts.clientId);
+  if (opts.sessionToken) url.searchParams.set('token', opts.sessionToken);
+  if (opts.staffToken) url.searchParams.set('staffToken', opts.staffToken);
+  return { clientId: opts.clientId, echoMessages: false, authUrl: url.toString(), authMethod: 'GET' };
+}

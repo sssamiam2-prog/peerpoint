@@ -40,8 +40,10 @@ export function VideoEmbed(props: { url: string; title?: string }): React.ReactE
       <iframe
         src={src}
         title={props.title || 'Embedded video'}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        referrerPolicy="strict-origin-when-cross-origin"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         allowFullScreen
+        loading="lazy"
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
       />
     </div>

@@ -7,6 +7,7 @@ import {
   deleteInvite,
   hashPassword,
   inviteSetupUrl,
+  inviteVerifyEmailUrl,
   loadUsers,
   normalizeEmail,
   normalizeUsername,
@@ -16,6 +17,8 @@ import {
   validateUsername,
   type StaffUser
 } from '../../_lib/staffAuth';
+import { toE164Phone } from '../../_lib/sms';
+import { isOutgoingCallerIdVerified, isTwilioCallerIdConfigured } from '../../_lib/twilioCallerId';
 
 type Ctx = { request: Request; env: Env };
 
@@ -46,7 +49,10 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
       jobTitle: invite.jobTitle,
       email: invite.email,
       role: invite.role,
-      setupUrl: inviteSetupUrl(token, invite.role)
+      cellPhone: invite.cellPhone,
+      emailVerified: Boolean(invite.emailVerifiedAt),
+      setupUrl: inviteSetupUrl(token, invite.role),
+      verifyEmailUrl: invite.emailVerifiedAt ? undefined : inviteVerifyEmailUrl(token, invite.role)
     },
     200,
     origin
@@ -88,6 +94,16 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   await ensureSeedAdmin(env);
   const invite = await getInvite(env, token);
   if (!invite) return json({ error: 'Invite not found or expired.' }, 404, origin);
+  if (!invite.emailVerifiedAt) {
+    return json(
+      {
+        error:
+          'Please verify your email first. Open the verification link from your invite email, then return here to finish registration.'
+      },
+      403,
+      origin
+    );
+  }
 
   const username = normalizeUsername(body.username ?? '');
   const userErr = validateUsername(username);
@@ -103,7 +119,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   }
 
   const currentShift = String(body.currentShift ?? '').trim();
-  const cellPhone = String(body.cellPhone ?? '').trim();
+  const cellPhone = String(body.cellPhone ?? invite.cellPhone ?? '').trim();
   const homePhone = String(body.homePhone ?? '').trim();
   const workPhone = String(body.workPhone ?? '').trim();
   const personalEmail = normalizeEmail(body.personalEmail ?? '');
@@ -135,6 +151,17 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   }
 
   const { hash, salt } = await hashPassword(password);
+  const cellE164 = toE164Phone(cellPhone);
+  let twilioVerifiedPhoneE164: string | undefined;
+  let twilioVerifiedAt: string | undefined;
+  if (cellE164 && isTwilioCallerIdConfigured(env)) {
+    const ok = await isOutgoingCallerIdVerified(env, cellE164);
+    if (ok) {
+      twilioVerifiedPhoneE164 = cellE164;
+      twilioVerifiedAt = new Date().toISOString();
+    }
+  }
+
   const created: StaffUser = {
     username,
     role: invite.role,
@@ -150,6 +177,9 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     cellPhone,
     homePhone,
     workPhone,
+    twilioVerifiedPhoneE164,
+    twilioVerifiedAt,
+    emailVerifiedAt: invite.emailVerifiedAt,
     displayName: `${invite.firstName} ${invite.lastName}`.trim(),
     passwordHash: hash,
     salt,

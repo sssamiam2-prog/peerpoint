@@ -65,7 +65,10 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
   }
 
   const mode = item.contactMode === 'voice' ? 'voice' : 'chat';
-  const path = mode === 'voice' ? `/voice?room=${encodeURIComponent(item.roomCode)}` : `/chat?room=${encodeURIComponent(item.roomCode)}`;
+  const path =
+    mode === 'voice'
+      ? `/voice?room=${encodeURIComponent(item.roomCode)}&from=join`
+      : `/chat?room=${encodeURIComponent(item.roomCode)}&from=join`;
 
   return json(
     {

@@ -1,18 +1,70 @@
 /**
  * Member-side site use gate (client).
  * Valid codes live only on the server — this module never embeds them.
- * Unlock is session-only and does not identify the employee.
+ * Unlock is in-memory for the current page only. Installed PWAs must re-enter
+ * the site use code on every fresh launch (sessionStorage alone can persist
+ * across PWA closes on phones).
+ *
+ * Exception: email/SMS join links grant a short session bypass so members go
+ * straight into chat/voice without re-entering the workplace site use code.
  */
 
 const UNLOCK_KEY = 'peerpoint_member_unlocked';
 const CODE_KEY = 'peerpoint_site_use_code';
+const JOIN_BYPASS_KEY = 'peerpoint_join_bypass';
 
-export function isMemberAccessUnlocked(): boolean {
+function safeRemove(storage: Storage, key: string): void {
   try {
-    return sessionStorage.getItem(UNLOCK_KEY) === '1' && Boolean(sessionStorage.getItem(CODE_KEY));
+    storage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Drop any persisted unlock markers (session + legacy localStorage). */
+export function clearMemberAccessUnlock(): void {
+  safeRemove(sessionStorage, UNLOCK_KEY);
+  safeRemove(sessionStorage, CODE_KEY);
+  try {
+    safeRemove(localStorage, UNLOCK_KEY);
+    safeRemove(localStorage, CODE_KEY);
+  } catch {
+    /* private mode / blocked */
+  }
+}
+
+/**
+ * Always false for a new document load — the gate must be completed again.
+ * (Do not restore unlock from storage; that skipped the modal on installed PWAs.)
+ */
+export function isMemberAccessUnlocked(): boolean {
+  return false;
+}
+
+/** True when this tab opened a valid email/SMS join link. */
+export function hasJoinLinkBypass(): boolean {
+  try {
+    return sessionStorage.getItem(JOIN_BYPASS_KEY) === '1';
   } catch {
     return false;
   }
+}
+
+/** Call after /api/join resolves so /chat and /voice skip the site-use code modal. */
+export function grantJoinLinkBypass(room?: string): void {
+  try {
+    sessionStorage.setItem(JOIN_BYPASS_KEY, '1');
+    if (room?.trim()) {
+      sessionStorage.setItem('peerpoint_join_room', room.trim().toUpperCase());
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearJoinLinkBypass(): void {
+  safeRemove(sessionStorage, JOIN_BYPASS_KEY);
+  safeRemove(sessionStorage, 'peerpoint_join_room');
 }
 
 /** Code the user typed after server validation — used on later API posts. */
@@ -27,8 +79,12 @@ export function getStoredSiteUseCode(): string | undefined {
 
 export function unlockMemberAccess(siteUseCode: string): void {
   try {
-    sessionStorage.setItem(UNLOCK_KEY, '1');
+    // Only the verified code is kept for API calls this page session.
+    // Do not set a durable "unlocked" flag — phones/PWA installs must re-enter.
+    sessionStorage.removeItem(UNLOCK_KEY);
     sessionStorage.setItem(CODE_KEY, siteUseCode.trim());
+    safeRemove(localStorage, UNLOCK_KEY);
+    safeRemove(localStorage, CODE_KEY);
   } catch {
     /* ignore quota / private mode */
   }

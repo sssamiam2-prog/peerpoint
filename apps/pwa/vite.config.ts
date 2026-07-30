@@ -67,11 +67,23 @@ export default defineConfig({
         clientsClaim: true,
         // Do NOT precache HTML — refresh must hit the network for a fresh shell
         // that points at new hashed /assets/* filenames.
-        globPatterns: ['**/*.{js,css,ico,png,svg,webp,woff2,webmanifest}'],
-        globIgnores: ['**/docs/**', '**/_headers', '**/index.html'],
+        globPatterns: ['**/*.{js,css,ico,svg,webp,woff2,webmanifest}'],
+        // Large PNG logos/icons are fetched on demand (keeps SW install fast).
+        globIgnores: ['**/docs/**', '**/_headers', '**/index.html', '**/peerpoint-*.png'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api/, /^\/docs\//],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /peerpoint-(logo|icon)\.png$/i.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'peerpoint-images',
+              expiration: {
+                maxEntries: 6,
+                maxAgeSeconds: 60 * 60 * 24 * 14
+              }
+            }
+          },
           {
             // Always try the network first for page loads / refresh.
             urlPattern: ({ request }) => request.mode === 'navigate',

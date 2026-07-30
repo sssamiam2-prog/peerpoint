@@ -13,47 +13,94 @@ import { RequestHelpPage } from './pages/RequestHelpPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { SelfHelpPage } from './pages/SelfHelpPage';
 import { SetupPage } from './pages/SetupPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { StaffPage } from './pages/StaffPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { VoiceTestPage } from './pages/VoiceTestPage';
+import { getUiMode, subscribeUiMode } from './lib/uiMode';
+import { ModernShell } from './modern/ModernShell';
+import { ModernHome } from './modern/ModernHome';
+import { ModernRequestIntro } from './modern/ModernRequestIntro';
+import { ModernWaiting } from './modern/ModernWaiting';
+import { ModernSessionChat } from './modern/ModernSessionChat';
+import { ModernResources } from './modern/ModernResources';
+import { ModernCheckIns } from './modern/ModernCheckIns';
+import { ModernMore } from './modern/ModernMore';
+import { ModernStaffRequests } from './modern/ModernStaffRequests';
+import { ModernStaffChat } from './modern/ModernStaffChat';
 
 function MemberNav(): React.ReactElement {
   const { pathname } = useLocation();
   const helpActive = pathname === '/' || pathname === '/request';
-  const moreActive =
-    pathname === '/more' ||
-    pathname.startsWith('/chat') ||
-    pathname.startsWith('/voice') ||
-    pathname.startsWith('/staff');
+  const chatActive = pathname.startsWith('/chat');
+  const voiceActive = pathname.startsWith('/voice') && !pathname.startsWith('/voice-test');
+  const staffActive = pathname.startsWith('/staff');
+  // "More" only for overflow routes on narrow layouts (install, etc.)
+  const moreActive = pathname === '/more' || pathname.startsWith('/voice-test');
+
+  const linkClass = (active: boolean): string =>
+    active ? 'app-nav__link app-nav__link--active' : 'app-nav__link';
 
   return (
     <>
-      <nav className="app-nav app-nav--member app-nav--top" aria-label="Main navigation">
-        <NavLink
-          to="/request"
-          className={() => (helpActive ? 'app-nav__link app-nav__link--active' : 'app-nav__link')}
-        >
+      {/* Wide / desktop: all primary destinations — no More */}
+      <nav className="app-nav app-nav--member app-nav--top app-nav--top-full" aria-label="Main navigation">
+        <NavLink to="/request" className={() => linkClass(helpActive)}>
           Get Help
         </NavLink>
         <NavLink
           to="/self-help"
-          className={({ isActive }) => (isActive ? 'app-nav__link app-nav__link--active' : 'app-nav__link')}
+          className={({ isActive }) => linkClass(isActive)}
         >
           Self Help
         </NavLink>
         <NavLink
           to="/resources"
-          className={({ isActive }) => (isActive ? 'app-nav__link app-nav__link--active' : 'app-nav__link')}
+          className={({ isActive }) => linkClass(isActive)}
+        >
+          Resources
+        </NavLink>
+        <NavLink to="/chat" className={() => linkClass(chatActive)}>
+          Chat
+        </NavLink>
+        <NavLink to="/voice" className={() => linkClass(voiceActive)}>
+          Voice
+        </NavLink>
+        <NavLink to="/staff" className={() => linkClass(staffActive)}>
+          Staff
+        </NavLink>
+      </nav>
+
+      {/* Mid-width: still top bar, shorter labels if needed, includes More only when compact */}
+      <nav className="app-nav app-nav--member app-nav--top app-nav--top-compact" aria-label="Main navigation">
+        <NavLink to="/request" className={() => linkClass(helpActive)}>
+          Help
+        </NavLink>
+        <NavLink
+          to="/self-help"
+          className={({ isActive }) => linkClass(isActive)}
+        >
+          Self Help
+        </NavLink>
+        <NavLink
+          to="/resources"
+          className={({ isActive }) => linkClass(isActive)}
         >
           Resources
         </NavLink>
         <NavLink
           to="/more"
-          className={() => (moreActive ? 'app-nav__link app-nav__link--active' : 'app-nav__link')}
+          className={() =>
+            moreActive || chatActive || voiceActive || staffActive
+              ? 'app-nav__link app-nav__link--active'
+              : 'app-nav__link'
+          }
         >
           More
         </NavLink>
       </nav>
 
+      {/* Phones: bottom tabs — More holds Chat / Voice / Staff / Install */}
       <nav className="app-nav app-nav--member app-nav--bottom" aria-label="Main navigation">
         <NavLink
           to="/request"
@@ -75,7 +122,11 @@ function MemberNav(): React.ReactElement {
         </NavLink>
         <NavLink
           to="/more"
-          className={() => (moreActive ? 'app-nav__tab app-nav__tab--active' : 'app-nav__tab')}
+          className={() =>
+            moreActive || chatActive || voiceActive || staffActive
+              ? 'app-nav__tab app-nav__tab--active'
+              : 'app-nav__tab'
+          }
         >
           <span className="app-nav__tab-label">More</span>
         </NavLink>
@@ -85,15 +136,31 @@ function MemberNav(): React.ReactElement {
 }
 
 function Layout(props: { children: React.ReactNode }): React.ReactElement {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const adminSite = isProductionAdminHost();
   const isSetup = pathname.startsWith('/setup');
+  const isResetPassword = pathname.startsWith('/reset-password');
+  const isVerifyEmail = pathname.startsWith('/verify-email');
   const isStaff = pathname.startsWith('/staff');
   const isVoiceTest = pathname.startsWith('/voice-test');
   const isJoin = pathname.startsWith('/join');
-  // Voice check + join links are open (no site-use code) so Staff/members can open devices/links freely.
-  const memberGateRoutes = !adminSite && !isSetup && !isStaff && !isVoiceTest && !isJoin;
-  const memberChrome = !adminSite && !isSetup && !isStaff;
+  // Email/SMS join links land on /join, then /chat|/voice?room=… — never ask for site use code.
+  const roomInvite = React.useMemo(() => {
+    if (!(pathname.startsWith('/chat') || pathname.startsWith('/voice'))) return false;
+    const room = new URLSearchParams(search).get('room')?.trim();
+    return Boolean(room);
+  }, [pathname, search]);
+  // Voice check + join links + room invites are open (no site-use code).
+  const memberGateRoutes =
+    !adminSite &&
+    !isSetup &&
+    !isResetPassword &&
+    !isVerifyEmail &&
+    !isStaff &&
+    !isVoiceTest &&
+    !isJoin &&
+    !roomInvite;
+  const memberChrome = !adminSite && !isSetup && !isResetPassword && !isVerifyEmail && !isStaff;
 
   const shell = (
     <div className={`app-layout${memberChrome ? ' app-layout--member' : ''}`}>
@@ -117,7 +184,7 @@ function Layout(props: { children: React.ReactNode }): React.ReactElement {
         </div>
       </header>
 
-      {!adminSite && !isSetup ? <CrisisStrip /> : null}
+      {!adminSite && !isSetup && !isResetPassword ? <CrisisStrip /> : null}
 
       {adminSite && !isSetup ? (
         <p className="app-privacy-note">
@@ -174,13 +241,43 @@ function Layout(props: { children: React.ReactNode }): React.ReactElement {
   return shell;
 }
 
-export default function App(): React.ReactElement {
+function ModernRoutes(): React.ReactElement {
+  return (
+    <Routes>
+      <Route path="/setup" element={<SetupPage />} />
+      <Route path="/join" element={<JoinPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/chat" element={<ChatPage />} />
+      <Route path="/voice" element={<PeerVoicePage />} />
+      <Route path="/staff" element={<ModernStaffRequests />} />
+      <Route path="/m/staff" element={<ModernStaffRequests />} />
+      <Route path="/m/staff/chat" element={<ModernStaffChat />} />
+      <Route path="*" element={<MemberAccessGate><ModernShell><Routes>
+        <Route path="/" element={<ModernHome />} />
+        <Route path="/m/request" element={<ModernRequestIntro />} />
+        <Route path="/m/waiting" element={<ModernWaiting />} />
+        <Route path="/m/chat" element={<ModernSessionChat />} />
+        <Route path="/m/resources" element={<ModernResources />} />
+        <Route path="/m/check-ins" element={<ModernCheckIns />} />
+        <Route path="/m/more" element={<ModernMore />} />
+        <Route path="/request" element={<Navigate to="/m/request" replace />} />
+        <Route path="/resources" element={<Navigate to="/m/resources" replace />} />
+        <Route path="/more" element={<Navigate to="/m/more" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes></ModernShell></MemberAccessGate>} />
+    </Routes>
+  );
+}
+
+function AppRoutes(): React.ReactElement {
   const adminSite = isProductionAdminHost();
+  const [mode, setMode] = React.useState(getUiMode);
+  React.useEffect(() => subscribeUiMode(() => setMode(getUiMode())), []);
+  if (mode === 'modern' && !adminSite) return <ModernRoutes />;
 
   return (
-    <BrowserRouter>
-      <ActionFeedbackProvider>
-        <Layout>
+    <Layout>
           <Routes>
             {adminSite ? (
               <>
@@ -193,6 +290,8 @@ export default function App(): React.ReactElement {
                 <Route path="/resources" element={<ResourcesPage />} />
                 <Route path="/join" element={<JoinPage />} />
                 <Route path="/setup" element={<SetupPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </>
             ) : (
@@ -208,11 +307,21 @@ export default function App(): React.ReactElement {
                 <Route path="/join" element={<JoinPage />} />
                 <Route path="/staff" element={<StaffPage />} />
                 <Route path="/setup" element={<SetupPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
                 <Route path="*" element={<div className="page-shell page-missing">Page not found.</div>} />
               </>
             )}
           </Routes>
         </Layout>
+  );
+}
+
+export default function App(): React.ReactElement {
+  return (
+    <BrowserRouter>
+      <ActionFeedbackProvider>
+        <AppRoutes />
       </ActionFeedbackProvider>
     </BrowserRouter>
   );

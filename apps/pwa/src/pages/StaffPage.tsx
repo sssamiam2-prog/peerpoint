@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useActionFeedback, type SuccessToast } from '../components/ActionFeedback';
 import { AdminContentPanel } from '../components/AdminContentPanel';
 import { AdminTestPanel } from '../components/AdminTestPanel';
+import { TwilioPhoneVerify } from '../components/TwilioPhoneVerify';
 import { ADMIN_HOST, isAdminHostClient, isProductionAdminHost } from '../lib/adminHost';
 
 const STAFF_TOKEN_KEY = 'peerpoint_staff_token';
@@ -70,6 +71,9 @@ type PublicAccount = {
   setupComplete: boolean;
   createdAt: string;
   isPeerSupportLeader?: boolean;
+  twilioPhoneVerified?: boolean;
+  emailVerified?: boolean;
+  cellPhone?: string;
 };
 
 type PendingInvite = {
@@ -82,6 +86,8 @@ type PendingInvite = {
   jobTitle: string;
   createdAt: string;
   invitedBy: string;
+  cellPhone?: string;
+  emailVerified?: boolean;
 };
 
 type OnCallSlot = {
@@ -200,6 +206,10 @@ export function StaffPage(): React.ReactElement {
 
   const [username, setUsername] = React.useState('');
   const [password, setPassword] = React.useState('');
+  /** On the member/installable app: Staff sign-in with nested Admin sign-in. */
+  const [loginMode, setLoginMode] = React.useState<StaffRole>(() =>
+    isProductionAdminHost() ? 'admin' : 'staff'
+  );
   const [token, setToken] = React.useState<string | null>(() => {
     try {
       return sessionStorage.getItem(STAFF_TOKEN_KEY);
@@ -230,6 +240,13 @@ export function StaffPage(): React.ReactElement {
   const [currentPassword, setCurrentPassword] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
   const [passwordMsg, setPasswordMsg] = React.useState<string | undefined>();
+  const [accountCellPhone, setAccountCellPhone] = React.useState('');
+  const [showForgotPassword, setShowForgotPassword] = React.useState(false);
+  const [forgotIdentity, setForgotIdentity] = React.useState('');
+  const [forgotBusy, setForgotBusy] = React.useState(false);
+  const [forgotMsg, setForgotMsg] = React.useState<string | undefined>();
+  const [availabilityConfirm, setAvailabilityConfirm] = React.useState<string | undefined>();
+  const [availabilityBusy, setAvailabilityBusy] = React.useState(false);
 
   const [accounts, setAccounts] = React.useState<PublicAccount[]>([]);
   const [pendingInvites, setPendingInvites] = React.useState<PendingInvite[]>([]);
@@ -238,6 +255,7 @@ export function StaffPage(): React.ReactElement {
   const [inviteBureau, setInviteBureau] = React.useState('');
   const [inviteJobTitle, setInviteJobTitle] = React.useState('');
   const [inviteEmail, setInviteEmail] = React.useState('');
+  const [inviteCellPhone, setInviteCellPhone] = React.useState('');
   const [inviteRole, setInviteRole] = React.useState<StaffRole>('staff');
   const [lastInviteUrl, setLastInviteUrl] = React.useState<string | undefined>();
   const [activeTab, setActiveTab] = React.useState<WorkspaceTab>('requests');
@@ -348,7 +366,7 @@ export function StaffPage(): React.ReactElement {
   const onLogin = async (): Promise<void> => {
     setError(undefined);
     if (!username.trim()) {
-      setError('Username is required.');
+      setError('Username or email is required.');
       return;
     }
     try {
@@ -369,6 +387,15 @@ export function StaffPage(): React.ReactElement {
       };
       if (!res.ok || !data.token || !data.role) {
         setError(data.error ?? 'Login failed.');
+        return;
+      }
+      const expectedMode = onProdAdminHost ? 'admin' : loginMode;
+      if (expectedMode === 'admin' && data.role !== 'admin') {
+        setError('That account is Staff. Switch to Staff sign-in.');
+        return;
+      }
+      if (expectedMode === 'staff' && data.role === 'admin') {
+        setError('That account is Admin. Switch to Admin sign-in.');
         return;
       }
       const nextMeta: SessionMeta = {
@@ -417,6 +444,41 @@ export function StaffPage(): React.ReactElement {
     }, toast => toast ?? undefined);
   };
 
+  const onForgotPassword = async (): Promise<void> => {
+    setError(undefined);
+    setForgotMsg(undefined);
+    const identity = forgotIdentity.trim() || username.trim();
+    if (!identity) {
+      setError('Enter your username or email to reset your password.');
+      return;
+    }
+    setForgotBusy(true);
+    await runAction('Sending reset email…', async (): Promise<SuccessToast | null> => {
+      try {
+        const res = await fetch('/api/staff/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usernameOrEmail: identity })
+        });
+        const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        if (!res.ok) {
+          setError(data.error ?? 'Could not start password reset.');
+          return null;
+        }
+        const message =
+          data.message ??
+          'If an account matches, we sent a reset link. Check your inbox (and spam). The link expires in 1 hour.';
+        setForgotMsg(message);
+        return { title: 'Check your email', message };
+      } catch {
+        setError('Network error. Try again.');
+        return null;
+      } finally {
+        setForgotBusy(false);
+      }
+    }, toast => toast ?? undefined);
+  };
+
   const onInviteUser = async (): Promise<void> => {
     setError(undefined);
     setInfo(undefined);
@@ -431,6 +493,7 @@ export function StaffPage(): React.ReactElement {
           bureau: inviteBureau,
           jobTitle: inviteJobTitle,
           email: inviteEmail,
+          cellPhone: inviteCellPhone,
           role: inviteRole
         })
       });
@@ -449,15 +512,16 @@ export function StaffPage(): React.ReactElement {
       setInviteBureau('');
       setInviteJobTitle('');
       setInviteEmail('');
+      setInviteCellPhone('');
       setInviteRole('staff');
       setLastInviteUrl(data.inviteUrl);
       const note = data.emailed
-        ? 'Invite email sent. You can also copy the link below.'
-        : data.emailNote ?? 'Invite created. Copy the link below and share it privately.';
+        ? 'Verification email sent. They verify email first; then Twilio calls their cell. You can also copy the link below.'
+        : data.emailNote ?? 'Invite created. Copy the verify link below and share it privately.';
       setInfo(note);
       await refreshAccounts();
       return {
-        title: data.emailed ? 'Invite email sent' : 'Invite created',
+        title: data.emailed ? 'Verification email sent' : 'Invite created',
         message: note
       };
     }, toast => toast ?? undefined);
@@ -466,7 +530,7 @@ export function StaffPage(): React.ReactElement {
   const onResendInvite = async (invite: PendingInvite): Promise<void> => {
     setError(undefined);
     setInfo(undefined);
-    await runAction('Resending invite…', async (): Promise<SuccessToast | null> => {
+    await runAction('Resending verification email…', async (): Promise<SuccessToast | null> => {
       const res = await fetch('/api/staff/accounts', {
         method: 'PATCH',
         headers: authHeaders(),
@@ -483,9 +547,108 @@ export function StaffPage(): React.ReactElement {
         return null;
       }
       setLastInviteUrl(data.inviteUrl);
-      const note = data.emailed ? 'Invite email resent.' : data.emailNote ?? 'Copy the invite link below.';
+      const note = data.emailed ? 'Verification email resent.' : data.emailNote ?? 'Copy the verify link below.';
       setInfo(note);
-      return { title: 'Invite resent', message: note };
+      return { title: 'Email resent', message: note };
+    }, toast => toast ?? undefined);
+  };
+
+  const onRetriggerInviteTwilio = async (invite: PendingInvite): Promise<void> => {
+    setError(undefined);
+    setInfo(undefined);
+    await runAction('Starting Twilio phone verify…', async (): Promise<SuccessToast | null> => {
+      const res = await fetch('/api/staff/accounts', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ inviteToken: invite.token, retriggerTwilio: true })
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        emailed?: boolean;
+        emailNote?: string;
+        validationCode?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not start phone verification.');
+        return null;
+      }
+      const note = [
+        data.message,
+        data.validationCode ? `Code: ${data.validationCode}` : null,
+        data.emailed ? 'Code emailed to member.' : data.emailNote
+      ]
+        .filter(Boolean)
+        .join(' ');
+      setInfo(note);
+      return { title: 'Phone verification', message: note };
+    }, toast => toast ?? undefined);
+  };
+
+  const onResendAccountEmailVerify = async (account: PublicAccount): Promise<void> => {
+    setError(undefined);
+    setInfo(undefined);
+    await runAction('Sending email verification…', async (): Promise<SuccessToast | null> => {
+      const res = await fetch('/api/staff/accounts', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ username: account.username, resendEmailVerification: true })
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        emailed?: boolean;
+        emailNote?: string;
+        verifyUrl?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not send email verification.');
+        return null;
+      }
+      if (data.verifyUrl) setLastInviteUrl(data.verifyUrl);
+      const note = data.emailed
+        ? data.message ?? 'Verification email sent.'
+        : data.emailNote ?? data.message ?? 'Copy the verify link below.';
+      setInfo(note);
+      return { title: 'Email verification', message: note };
+    }, toast => toast ?? undefined);
+  };
+
+  const onRetriggerAccountTwilio = async (account: PublicAccount): Promise<void> => {
+    setError(undefined);
+    setInfo(undefined);
+    await runAction('Starting Twilio phone verify…', async (): Promise<SuccessToast | null> => {
+      const res = await fetch('/api/staff/accounts', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ username: account.username, retriggerTwilioVerify: true })
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        emailed?: boolean;
+        emailNote?: string;
+        validationCode?: string;
+        account?: PublicAccount;
+      };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not start phone verification.');
+        return null;
+      }
+      if (data.account) {
+        setAccounts(prev => prev.map(a => (a.username === data.account!.username ? data.account! : a)));
+      } else {
+        await refreshAccounts();
+      }
+      const note = [
+        data.message,
+        data.validationCode ? `Code: ${data.validationCode}` : null,
+        data.emailed ? 'Code emailed to member.' : data.emailNote
+      ]
+        .filter(Boolean)
+        .join(' ');
+      setInfo(note);
+      return { title: 'Phone verification', message: note };
     }, toast => toast ?? undefined);
   };
 
@@ -620,15 +783,27 @@ export function StaffPage(): React.ReactElement {
             assignedPeer: peerName.trim() || meta?.displayName || meta?.username || 'Peer'
           })
         });
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          emailed?: {
+            memberEmailed?: boolean;
+            staffEmailed?: boolean;
+            memberSms?: boolean;
+            staffSms?: boolean;
+            summary?: string;
+          };
+        };
         if (!res.ok) {
           setError(data.error ?? 'Assign failed.');
           return null;
         }
         await refresh();
+        const summary =
+          data.emailed?.summary ??
+          'Room code generated. Email/SMS sent when contact info and Twilio/Resend are configured.';
         return {
           title: 'Request assigned',
-          message: 'Room code generated and emailed to member and you (when emails are on file).'
+          message: summary
         };
       } finally {
         setBusyId(null);
@@ -651,6 +826,13 @@ export function StaffPage(): React.ReactElement {
           roomCode?: string;
           joinPath?: string;
           contactMode?: 'chat' | 'voice';
+          emailed?: {
+            memberEmailed?: boolean;
+            staffEmailed?: boolean;
+            memberSms?: boolean;
+            staffSms?: boolean;
+            summary?: string;
+          };
         };
         if (!res.ok) {
           setError(data.error ?? 'Could not accept.');
@@ -658,9 +840,10 @@ export function StaffPage(): React.ReactElement {
         }
         await refresh();
         const room = data.roomCode ? ` Room ${data.roomCode}.` : '';
+        const summary = data.emailed?.summary ?? 'Member notified when email/SMS is configured.';
         return {
           title: 'Accepted',
-          message: `Member and you were emailed the room code.${room} Open the link in your email or join below.`
+          message: `${summary}${room}`
         };
       } finally {
         setBusyId(null);
@@ -678,15 +861,30 @@ export function StaffPage(): React.ReactElement {
           headers: authHeaders(),
           body: JSON.stringify({ action: 'declineQueue', id })
         });
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          reoffered?: boolean;
+          nextPeer?: string;
+          notify?: { summary?: string };
+        };
         if (!res.ok) {
           setError(data.error ?? 'Could not decline.');
           return null;
         }
         await refresh();
+        if (data.reoffered) {
+          return {
+            title: 'Passed to next peer',
+            message:
+              data.notify?.summary ??
+              (data.nextPeer
+                ? `Offered to ${data.nextPeer} (email + SMS when configured).`
+                : 'Next free on-call peer was notified.')
+          };
+        }
         return {
           title: 'Declined',
-          message: 'Peer Support Leaders were notified to cover this request.'
+          message: 'No other free peer was available. Peer Support Leaders were notified.'
         };
       } finally {
         setBusyId(null);
@@ -848,63 +1046,121 @@ export function StaffPage(): React.ReactElement {
 
   const setPeerAvailable = async (available: boolean): Promise<void> => {
     setError(undefined);
+    setAvailabilityConfirm(undefined);
+    setAvailabilityBusy(true);
     await runAction(available ? 'Marking available…' : 'Marking unavailable…', async (): Promise<SuccessToast | null> => {
-      const res = await fetch('/api/staff/requests', {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          action: 'setPeerAvailable',
-          available,
-          reason: available ? undefined : 'manually marked unavailable'
-        })
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        me?: { peerAvailable?: boolean; unavailableSince?: string; unavailableReason?: string };
-      };
-      if (!res.ok) {
-        setError(data.error ?? 'Could not update availability.');
-        return null;
-      }
-      if (data.me && meta) {
-        const next = {
-          ...meta,
-          peerAvailable: data.me.peerAvailable,
-          unavailableSince: data.me.unavailableSince,
-          unavailableReason: data.me.unavailableReason
+      try {
+        const res = await fetch('/api/staff/requests', {
+          method: 'PATCH',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            action: 'setPeerAvailable',
+            available,
+            reason: available ? undefined : 'manually marked unavailable'
+          })
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          me?: { peerAvailable?: boolean; unavailableSince?: string; unavailableReason?: string };
         };
-        setMeta(next);
-        sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(next));
+        if (!res.ok) {
+          setError(data.error ?? 'Could not update availability.');
+          setAvailabilityConfirm('Status was not changed. Try again.');
+          return null;
+        }
+        const nowAvailable = data.me?.peerAvailable !== false;
+        if (data.me && meta) {
+          const next = {
+            ...meta,
+            peerAvailable: data.me.peerAvailable,
+            unavailableSince: data.me.unavailableSince,
+            unavailableReason: data.me.unavailableReason
+          };
+          setMeta(next);
+          sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(next));
+        }
+        // Verify server echo matches the requested change.
+        if (nowAvailable !== available) {
+          setAvailabilityConfirm(
+            `Status may not have updated (server still shows ${nowAvailable ? 'Available' : 'Unavailable'}). Refresh and try again.`
+          );
+          setError('Availability did not match the requested change.');
+          return null;
+        }
+        setAvailabilityConfirm(
+          nowAvailable
+            ? 'Confirmed: you are now Available for peer matching.'
+            : 'Confirmed: you are now Unavailable. Members will not be matched to you.'
+        );
+        await refresh();
+        return {
+          title: nowAvailable ? 'You are available' : 'You are unavailable',
+          message: nowAvailable
+            ? 'Members can match you again for immediate contact while you are On Call.'
+            : 'You will get a reminder email about every 30 minutes until you mark yourself available.'
+        };
+      } finally {
+        setAvailabilityBusy(false);
       }
-      await refresh();
-      return {
-        title: available ? 'You are available' : 'You are unavailable',
-        message: available
-          ? 'Members can match you again for immediate contact while you are On Call.'
-          : 'You will get a reminder email about every 30 minutes until you mark yourself available.'
-      };
     }, toast => toast ?? undefined);
   };
 
   if (!token) {
+    const mode = onProdAdminHost ? 'admin' : loginMode;
     return (
       <div className="page-shell page-shell-tight">
-        <h2>{onAdminHost ? 'Admin sign-in' : 'Staff workspace'}</h2>
+        <h2>{mode === 'admin' ? 'Admin sign-in' : 'Staff sign-in'}</h2>
         <p className="lede">
-          {onAdminHost
-            ? `Enter your Admin username and password. Production Admin URL: https://${ADMIN_HOST}`
-            : 'For Peer Support Therapists and on-duty peers. Sign in with your username and password.'}
+          {onProdAdminHost
+            ? `Enter your Admin username or email and password. Production Admin URL: https://${ADMIN_HOST}`
+            : mode === 'admin'
+              ? 'Sign in with your Admin username or email and password. Works in this installed app on Windows, Mac, or phone.'
+              : 'For Peer Support staff and on-duty peers. Sign in with your Staff username or email and password.'}
         </p>
+
+        {!onProdAdminHost ? (
+          <div className="staff-login-modes" role="tablist" aria-label="Sign-in type">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={loginMode === 'staff'}
+              className={
+                loginMode === 'staff' ? 'staff-login-modes__btn staff-login-modes__btn--active' : 'staff-login-modes__btn'
+              }
+              onClick={() => {
+                setLoginMode('staff');
+                setError(undefined);
+              }}
+            >
+              Staff login
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={loginMode === 'admin'}
+              className={
+                loginMode === 'admin' ? 'staff-login-modes__btn staff-login-modes__btn--active' : 'staff-login-modes__btn'
+              }
+              onClick={() => {
+                setLoginMode('admin');
+                setError(undefined);
+              }}
+            >
+              Admin login
+            </button>
+          </div>
+        ) : null}
+
         {error && <div style={{ color: '#a4262c', marginTop: 8 }}>{error}</div>}
         <label style={{ display: 'block', marginTop: 16 }}>
-          Username
+          Username or email
           <input
             value={username}
             onChange={e => setUsername(e.target.value)}
             autoComplete="username"
             required
             name="username"
-            placeholder="Enter username"
+            placeholder={mode === 'admin' ? 'Admin username or email' : 'Staff username or email'}
           />
         </label>
         <label style={{ display: 'block', marginTop: 12 }}>
@@ -919,9 +1175,68 @@ export function StaffPage(): React.ReactElement {
           />
         </label>
         <button type="button" style={{ marginTop: 12 }} onClick={() => void onLogin()}>
-          Sign in
+          {mode === 'admin' ? 'Sign in as Admin' : 'Sign in as Staff'}
         </button>
-        {onProdAdminHost ? (
+        <p style={{ marginTop: 12, fontSize: 14 }}>
+          <button
+            type="button"
+            className="linkish"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              color: 'var(--accent, #0f6a4a)',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              font: 'inherit'
+            }}
+            onClick={() => {
+              setShowForgotPassword(v => !v);
+              setForgotMsg(undefined);
+              setError(undefined);
+              if (!forgotIdentity && username) setForgotIdentity(username);
+            }}
+          >
+            Forgot password?
+          </button>
+        </p>
+        {showForgotPassword ? (
+          <div
+            style={{
+              marginTop: 8,
+              padding: 12,
+              border: '1px solid var(--border, #d5e0d8)',
+              borderRadius: 8,
+              maxWidth: 420
+            }}
+          >
+            <p style={{ margin: '0 0 8px', fontSize: 14 }}>
+              Enter your username or the email on your account. We will send a reset link if a match is found.
+            </p>
+            <label style={{ display: 'block' }}>
+              Username or email
+              <input
+                value={forgotIdentity}
+                onChange={e => setForgotIdentity(e.target.value)}
+                autoComplete="username"
+                name="forgot-identity"
+                placeholder={username || 'username or email'}
+              />
+            </label>
+            <button
+              type="button"
+              style={{ marginTop: 10 }}
+              disabled={forgotBusy}
+              onClick={() => void onForgotPassword()}
+            >
+              {forgotBusy ? 'Sending…' : 'Send reset link'}
+            </button>
+            {forgotMsg ? (
+              <p style={{ color: 'var(--accent, #0f6a4a)', marginTop: 10, fontSize: 14 }}>{forgotMsg}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {mode === 'admin' || onProdAdminHost ? (
           <p style={{ fontSize: 13, marginTop: 16, color: 'var(--text)' }}>
             Admin How-To:{' '}
             <a href="/docs/PEERPoint-Admin-How-To.docx" download>
@@ -932,10 +1247,21 @@ export function StaffPage(): React.ReactElement {
               Download PDF
             </a>
           </p>
-        ) : null}
-        {!onAdminHost ? (
+        ) : (
           <p style={{ fontSize: 13, marginTop: 16, color: 'var(--text)' }}>
-            Admins: open <strong>https://{ADMIN_HOST}</strong> with your Admin username.
+            Staff How-To:{' '}
+            <a href="/docs/PEERPoint-Staff-How-To.docx" download>
+              Download Word
+            </a>
+            {' · '}
+            <a href="/docs/PEERPoint-Staff-How-To.pdf" download>
+              Download PDF
+            </a>
+          </p>
+        )}
+        {!onProdAdminHost && mode === 'staff' ? (
+          <p style={{ fontSize: 13, marginTop: 12, color: 'var(--text-muted)' }}>
+            Need Admin tools? Use the <strong>Admin login</strong> tab above in this same app.
           </p>
         ) : null}
       </div>
@@ -943,10 +1269,11 @@ export function StaffPage(): React.ReactElement {
   }
 
   const isAdmin = meta?.role === 'admin';
-  const showMembersTab = isAdmin && onAdminHost;
-  const showContentTab = isAdmin && onAdminHost;
-  const showReportsTab = isAdmin && onAdminHost;
-  const showTestTab = isAdmin && onAdminHost;
+  // Admin tools work in the installable member app (Windows/desktop PWA), not only on the Admin host.
+  const showMembersTab = isAdmin;
+  const showContentTab = isAdmin;
+  const showReportsTab = isAdmin;
+  const showTestTab = isAdmin;
   const adminOnlyTabs: WorkspaceTab[] = ['members', 'content', 'reports', 'test'];
   const tab =
     adminOnlyTabs.includes(activeTab) && !showMembersTab && activeTab === 'members'
@@ -959,32 +1286,129 @@ export function StaffPage(): React.ReactElement {
             ? 'requests'
             : activeTab;
 
+  const isAvailable = meta?.peerAvailable !== false;
+  const welcomeName = meta?.displayName || meta?.username || (isAdmin ? 'Admin' : 'Staff');
+
   return (
     <div className="page-shell">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: 0 }}>{isAdmin ? 'Admin workspace' : 'Staff workspace'}</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text)' }}>
-            Signed in as <strong>{meta?.displayName || meta?.username}</strong>
-            {meta?.username ? ` (${meta.username})` : ''}
-            {isAdmin ? ' · Admin' : ' · Staff'}
-          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {isAdmin && !onAdminHost ? (
+          {isAdmin && !onProdAdminHost ? (
             <a
               className="btn-ghost"
               href={`https://${ADMIN_HOST}/`}
               style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
             >
-              Open Admin site
+              Open Admin website
             </a>
           ) : null}
-        <button type="button" className="btn-ghost" onClick={() => void onLogout()}>
-          Sign out
-        </button>
+          <button type="button" className="btn-ghost" onClick={() => void onLogout()}>
+            Sign out
+          </button>
         </div>
       </div>
+
+      <section
+        className="staff-welcome"
+        aria-label="Welcome and availability"
+        style={{
+          marginTop: 14,
+          padding: 16,
+          borderRadius: 14,
+          border: `2px solid ${isAvailable ? 'var(--accent, #0f6a4a)' : '#b45309'}`,
+          background: isAvailable ? 'var(--social-bg, #f6faf7)' : '#fffbeb',
+          display: 'grid',
+          gap: 10,
+          maxWidth: 640
+        }}
+      >
+        <div>
+          <h3 style={{ margin: 0, fontSize: 22 }}>
+            Welcome, {welcomeName}
+          </h3>
+          <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--text)' }}>
+            You are signed in as <strong>{isAdmin ? 'Admin' : 'Staff'}</strong>
+            {meta?.username ? ` (${meta.username})` : ''}.
+          </p>
+        </div>
+
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+            alignItems: 'center'
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 12px',
+              borderRadius: 999,
+              fontWeight: 700,
+              fontSize: 14,
+              background: isAvailable ? 'rgba(15, 106, 74, 0.12)' : 'rgba(180, 83, 9, 0.15)',
+              color: isAvailable ? 'var(--accent, #0f6a4a)' : '#92400e'
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: isAvailable ? 'var(--accent, #0f6a4a)' : '#b45309'
+              }}
+            />
+            Status: {isAvailable ? 'Available' : 'Unavailable'}
+          </span>
+          <button
+            type="button"
+            disabled={availabilityBusy}
+            onClick={() => void setPeerAvailable(!isAvailable)}
+          >
+            {availabilityBusy
+              ? 'Updating…'
+              : isAvailable
+                ? 'Mark myself unavailable'
+                : 'Mark myself available'}
+          </button>
+        </div>
+
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text)' }}>
+          {isAvailable
+            ? 'Members can be matched to you for immediate contact while you are On Call.'
+            : `Members will not be matched to you${
+                meta?.unavailableReason ? ` (${meta.unavailableReason})` : ''
+              }.${
+                meta?.unavailableSince
+                  ? ` Since ${new Date(meta.unavailableSince).toLocaleString()}.`
+                  : ''
+              } You will get an email reminder about every 30 minutes until you mark yourself available again.`}
+        </p>
+
+        {availabilityConfirm ? (
+          <p
+            role="status"
+            style={{
+              margin: 0,
+              fontSize: 14,
+              fontWeight: 600,
+              color: isAvailable ? 'var(--accent, #0f6a4a)' : '#92400e'
+            }}
+          >
+            {availabilityConfirm}
+          </p>
+        ) : null}
+      </section>
+
       <p style={{ marginTop: 10, fontSize: 14 }}>
         {showTestTab ? (
           <>
@@ -998,33 +1422,6 @@ export function StaffPage(): React.ReactElement {
           </>
         )}
       </p>
-      {meta?.peerAvailable === false ? (
-        <div
-          role="status"
-          style={{
-            marginTop: 12,
-            padding: 14,
-            borderRadius: 12,
-            border: '2px solid #b45309',
-            background: '#fffbeb',
-            display: 'grid',
-            gap: 8
-          }}
-        >
-          <strong>You are marked Unavailable</strong>
-          <p style={{ margin: 0, fontSize: 14 }}>
-            Members will not be matched to you for immediate contact
-            {meta.unavailableReason ? ` (${meta.unavailableReason})` : ''}.
-            {meta.unavailableSince
-              ? ` Since ${new Date(meta.unavailableSince).toLocaleString()}.`
-              : ''}{' '}
-            You will get an email reminder about every 30 minutes until you mark yourself available again.
-          </p>
-          <button type="button" onClick={() => void setPeerAvailable(true)}>
-            Mark myself available
-          </button>
-        </div>
-      ) : null}
       {error && <div style={{ color: '#a4262c', marginTop: 8 }}>{error}</div>}
       {info && <div style={{ color: 'var(--accent, #0f6a4a)', marginTop: 8 }}>{info}</div>}
 
@@ -1124,8 +1521,9 @@ export function StaffPage(): React.ReactElement {
           aria-labelledby="tab-requests"
         >
           <p className="lede" style={{ marginTop: 0 }}>
-            Accept queued chat/voice requests, or assign a room code for open follow-ups. Member and staff both get an
-            email with the room code and a one-tap join link.
+            Accept queued chat/voice requests, or assign a room code for open follow-ups. Member and staff both get
+            email and text with the room code and a one-tap join link. New requests go to the next free on-call peer
+            (peers already in a session are skipped; peers who have not taken a session yet are preferred).
           </p>
           <h3>Assign as</h3>
           <label>
@@ -1184,8 +1582,8 @@ export function StaffPage(): React.ReactElement {
                   {r.description ? <p style={{ fontSize: 14, marginTop: 8 }}>{r.description}</p> : null}
                   {r.status === 'queued' ? (
                     <p style={{ fontSize: 13, marginTop: 8, color: 'var(--text-muted)' }}>
-                      Accept to generate a room code and email it to the member and you. Decline alerts Peer Support
-                      Leaders.
+                      Accept to create a room code and notify the member (email + text). Decline offers the next free
+                      on-call peer; Leaders are alerted only if nobody else is free.
                     </p>
                   ) : null}
                   {r.roomCode ? (
@@ -1215,7 +1613,7 @@ export function StaffPage(): React.ReactElement {
                     {r.status === 'queued' && (offeredToMe || isAdmin) ? (
                       <>
                         <button type="button" disabled={busyId === r.id} onClick={() => void acceptQueue(r.id)}>
-                          Accept &amp; email room code
+                          Accept &amp; notify (email + SMS)
                         </button>
                         <button
                           type="button"
@@ -1223,7 +1621,7 @@ export function StaffPage(): React.ReactElement {
                           disabled={busyId === r.id}
                           onClick={() => void declineQueue(r.id)}
                         >
-                          Decline (alert Leaders)
+                          Decline (next peer)
                         </button>
                       </>
                     ) : null}
@@ -1588,8 +1986,8 @@ export function StaffPage(): React.ReactElement {
         <section className="staff-tab-panel" role="tabpanel" id="panel-members" aria-labelledby="tab-members">
           <h3 style={{ marginTop: 0 }}>Invite Peer Support Member</h3>
           <p style={{ fontSize: 14, color: 'var(--text)' }}>
-            Enter their profile and access level. They receive an email to finish registration (username, password,
-            phones, emails). Admins automatically have staff queue rights.
+            They receive a <strong>verification email</strong> first. After they verify, Twilio calls their cell for SMS
+            allow-list setup, then they finish registration (username and password).
           </p>
           <form
             autoComplete="off"
@@ -1669,6 +2067,17 @@ export function StaffPage(): React.ReactElement {
                 onChange={e => setInviteEmail(e.target.value)}
               />
             </label>
+            <label>
+              Cell phone
+              <input
+                type="tel"
+                name="invite-cell-phone"
+                autoComplete="off"
+                placeholder="8015551234"
+                value={inviteCellPhone}
+                onChange={e => setInviteCellPhone(e.target.value)}
+              />
+            </label>
             <fieldset style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
               <legend style={{ padding: '0 4px' }}>Access</legend>
               <label style={{ display: 'inline-flex', gap: 6, marginRight: 16, alignItems: 'center' }}>
@@ -1690,17 +2099,17 @@ export function StaffPage(): React.ReactElement {
                 Admin
               </label>
             </fieldset>
-            <button type="submit">Send invite</button>
+            <button type="submit">Send verification email</button>
           </form>
 
           {lastInviteUrl ? (
             <div style={{ marginTop: 12, maxWidth: 560 }}>
               <label>
-                Invite link
+                Verify / invite link
                 <input readOnly value={lastInviteUrl} onFocus={e => e.target.select()} />
               </label>
               <button type="button" className="btn-ghost" style={{ marginTop: 8 }} onClick={() => void copyInviteUrl()}>
-                Copy invite link
+                Copy link
               </button>
             </div>
           ) : null}
@@ -1724,13 +2133,28 @@ export function StaffPage(): React.ReactElement {
                         {inv.firstName} {inv.lastName}
                       </strong>{' '}
                       · {inv.role === 'admin' ? 'Admin' : 'Staff'} · pending
+                      {inv.emailVerified ? ' · email verified' : ' · email not verified'}
                     </div>
                     <div style={{ fontSize: 13, marginTop: 4 }}>
-                      {inv.email} · {inv.bureau} · {inv.jobTitle}
+                      {inv.email}
+                      {inv.cellPhone ? ` · ${inv.cellPhone}` : ''} · {inv.bureau} · {inv.jobTitle}
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                       <button type="button" className="btn-ghost" onClick={() => void onResendInvite(inv)}>
-                        Resend
+                        Resend email verify
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => void onRetriggerInviteTwilio(inv)}
+                        disabled={!inv.emailVerified}
+                        title={
+                          inv.emailVerified
+                            ? 'Call their cell via Twilio again'
+                            : 'Email must be verified first'
+                        }
+                      >
+                        Retrigger phone verify
                       </button>
                       <button type="button" className="btn-ghost" onClick={() => void onRevokeInvite(inv)}>
                         Revoke
@@ -1745,7 +2169,7 @@ export function StaffPage(): React.ReactElement {
           <h4 style={{ marginTop: 24 }}>Accounts</h4>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
             Designate <strong>Peer Support Leaders</strong> to receive email when on-call coverage is unavailable or a
-            peer declines a queued request.
+            peer declines a queued request. Use the verify buttons to resend email or Twilio cell verification.
           </p>
           <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'grid', gap: 8 }}>
             {accounts.map(a => (
@@ -1771,6 +2195,8 @@ export function StaffPage(): React.ReactElement {
                   {' · '}
                   {a.active ? 'active' : 'disabled'}
                   {a.isPeerSupportLeader ? ' · Peer Support Leader' : ''}
+                  {a.emailVerified ? ' · email verified' : ' · email not verified'}
+                  {a.twilioPhoneVerified ? ' · SMS phone verified' : ' · SMS phone not verified'}
                   {a.username === 'admin' ? (
                     <> · master control (not used for peer matching)</>
                   ) : (
@@ -1782,9 +2208,26 @@ export function StaffPage(): React.ReactElement {
                   <br />
                   <span style={{ fontSize: 13 }}>
                     {a.bureau} · {a.jobTitle} · {a.email}
+                    {a.cellPhone ? ` · ${a.cellPhone}` : ''}
                   </span>
                 </span>
                 <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {a.username !== 'admin' ? (
+                    <button type="button" className="btn-ghost" onClick={() => void onResendAccountEmailVerify(a)}>
+                      Resend email verify
+                    </button>
+                  ) : null}
+                  {a.username !== 'admin' ? (
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => void onRetriggerAccountTwilio(a)}
+                      disabled={!a.cellPhone}
+                      title={a.cellPhone ? 'Twilio will call their cell' : 'No cell phone on file'}
+                    >
+                      Retrigger phone verify
+                    </button>
+                  ) : null}
                   {a.username !== 'admin' && a.sex !== 'male' ? (
                     <button type="button" className="btn-ghost" onClick={() => void onChangeSex(a, 'male')}>
                       Set Male
@@ -1959,7 +2402,7 @@ export function StaffPage(): React.ReactElement {
 
       {tab === 'account' ? (
         <section className="staff-tab-panel" role="tabpanel" id="panel-account" aria-labelledby="tab-account">
-          {isAdmin && onAdminHost ? (
+          {isAdmin ? (
             <>
               <h3 style={{ marginTop: 0 }}>How-To guides</h3>
               <p style={{ fontSize: 14, color: 'var(--text)' }}>
@@ -1996,6 +2439,18 @@ export function StaffPage(): React.ReactElement {
               </div>
             </>
           )}
+
+          <h3 style={{ marginTop: 28 }}>Cell phone &amp; SMS</h3>
+          <p style={{ fontSize: 14, color: 'var(--text)', marginTop: 0 }}>
+            Verify your cell once so Twilio trial SMS (queue alerts and room codes) can reach you.
+          </p>
+          <div style={{ maxWidth: 420 }}>
+            <TwilioPhoneVerify
+              authToken={token}
+              phone={accountCellPhone}
+              onPhoneChange={setAccountCellPhone}
+            />
+          </div>
 
           <h3 style={{ marginTop: 28 }}>Change password</h3>
           {passwordMsg ? <p style={{ color: 'var(--accent, #0f6a4a)' }}>{passwordMsg}</p> : null}

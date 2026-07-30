@@ -1,5 +1,5 @@
-import { sendLeaderFallbackEmail, sendRoomConnectEmails } from '../_lib/email';
-import { sendTwilioSms } from '../_lib/sms';
+import { sendLeaderFallbackEmail, sendOnCallAlertEmail, sendRoomConnectEmails } from '../_lib/email';
+import { isTwilioSmsConfigured, sendTwilioSms } from '../_lib/sms';
 import type { Env, HelpRequest } from '../_lib/store';
 import { notifyTeams } from '../_lib/store';
 import {
@@ -18,12 +18,120 @@ function staffPhone(u: StaffUser): string {
   return (u.cellPhone || u.workPhone || u.homePhone || '').trim();
 }
 
+/** Staff SMS when a peer-support room is ready (join link + room code). */
+export function staffRoomReadySms(joinUrl: string, roomCode: string): string {
+  const room = roomCode.trim().toUpperCase();
+  return (
+    `From SLCO Sheriff's Office - You have a Peer Support request pending - ` +
+    `Please click here to go directly to the Chat ${joinUrl} The room code is ${room}`
+  );
+}
+
+/** Requester SMS when their request created a room (join link + room code). */
+export function memberRoomReadySms(joinUrl: string, roomCode: string): string {
+  const room = roomCode.trim().toUpperCase();
+  return (
+    `From SLCO Sheriff's Office - Your request has been sent to the Peer Support Staff Member ` +
+    `and they should join the chat shortly. Your Room code is ${room} ` +
+    `Please click this link to be taken to the private anonymous chat. ${joinUrl}`
+  );
+}
+
 export type RoomNotifyResult = {
   memberEmailed: boolean;
   staffEmailed: boolean;
   memberSms: boolean;
   staffSms: boolean;
+  /** Human-readable delivery summary for Staff UI. */
+  summary: string;
+  smsConfigured: boolean;
+  memberSmsNote?: string;
+  staffSmsNote?: string;
 };
+
+function buildNotifySummary(r: Omit<RoomNotifyResult, 'summary'>): string {
+  const parts: string[] = [];
+  parts.push(r.memberEmailed ? 'Member emailed' : 'Member email not sent');
+  parts.push(r.staffEmailed ? 'Staff emailed' : 'Staff email not sent');
+  if (!r.smsConfigured) {
+    parts.push('SMS not configured (Twilio secrets)');
+  } else {
+    parts.push(r.memberSms ? 'Member texted' : `Member SMS skipped${r.memberSmsNote ? ` (${r.memberSmsNote})` : ''}`);
+    parts.push(r.staffSms ? 'Staff texted' : `Staff SMS skipped${r.staffSmsNote ? ` (${r.staffSmsNote})` : ''}`);
+  }
+  return parts.join(' · ');
+}
+
+export type OnCallQueueAlertResult = {
+  emailed: boolean;
+  sms: boolean;
+  smsConfigured: boolean;
+  smsNote?: string;
+  summary: string;
+};
+
+/** Alert the offered on-call peer that a member is waiting (email + SMS). No room code yet. */
+export async function notifyOnCallPeerWaiting(
+  env: Env,
+  opts: {
+    staff: StaffUser;
+    contactMode: 'chat' | 'voice';
+    preferredSexLabel: string;
+  }
+): Promise<OnCallQueueAlertResult> {
+  const staffUrl = `${MEMBER_ORIGIN}/staff`;
+  const modeLabel = opts.contactMode === 'voice' ? 'voice call' : 'chat';
+  const smsConfigured = isTwilioSmsConfigured(env);
+  let emailed = false;
+  let sms = false;
+  let smsNote: string | undefined;
+
+  const toEmail = staffEmail(opts.staff);
+  if (toEmail) {
+    const mail = await sendOnCallAlertEmail(env, {
+      to: toEmail,
+      staffFirstName: opts.staff.firstName || displayNameFor(opts.staff),
+      contactMode: opts.contactMode,
+      staffUrl,
+      preferredSexLabel: opts.preferredSexLabel
+    });
+    emailed = mail.ok && mail.emailed === true;
+  }
+
+  const phone = staffPhone(opts.staff);
+  if (!phone) {
+    smsNote = 'No cell/work phone on staff profile';
+  } else if (!smsConfigured) {
+    smsNote = 'Twilio not configured';
+  } else {
+    const result = await sendTwilioSms(env, {
+      to: phone,
+      body:
+        `From SLCO Sheriff's Office - You have a Peer Support ${modeLabel} request pending. ` +
+        `Open Staff to Accept: ${staffUrl}`
+    });
+    if (result.ok && result.sent === true) {
+      sms = true;
+    } else if (result.ok) {
+      smsNote = result.reason;
+    } else {
+      smsNote = result.error;
+    }
+  }
+
+  const parts: string[] = [];
+  parts.push(emailed ? 'Staff emailed' : 'Staff email not sent');
+  if (!smsConfigured) parts.push('SMS not configured');
+  else parts.push(sms ? 'Staff texted' : `Staff SMS skipped${smsNote ? ` (${smsNote})` : ''}`);
+
+  return {
+    emailed,
+    sms,
+    smsConfigured,
+    smsNote,
+    summary: parts.join(' · ')
+  };
+}
 
 /** After a room is issued, email + optionally SMS member and assigned staff with token join links. */
 export async function emailRoomParticipants(
@@ -33,8 +141,19 @@ export async function emailRoomParticipants(
   const mode = item.contactMode === 'voice' ? 'voice' : 'chat';
   const room = item.roomCode;
   const token = item.memberJoinToken;
+  const smsConfigured = isTwilioSmsConfigured(env);
   if (!room || !token) {
-    return { memberEmailed: false, staffEmailed: false, memberSms: false, staffSms: false };
+    const empty: RoomNotifyResult = {
+      memberEmailed: false,
+      staffEmailed: false,
+      memberSms: false,
+      staffSms: false,
+      smsConfigured,
+      summary: 'No room/token — nothing to notify.',
+      memberSmsNote: 'No room',
+      staffSmsNote: 'No room'
+    };
+    return empty;
   }
 
   let staff: StaffUser | undefined;
@@ -56,36 +175,63 @@ export async function emailRoomParticipants(
     staffFirstName: staff?.firstName || item.assignedPeer
   });
 
-  const modeLabel = mode === 'voice' ? 'Peer voice' : 'Peer chat';
   let memberSms = false;
   let staffSms = false;
+  let memberSmsNote: string | undefined;
+  let staffSmsNote: string | undefined;
 
   const memberPhone = (item.requesterPhone || '').trim();
-  if (memberPhone && memberPhone.toLowerCase() !== 'test' && memberPhone.toLowerCase() !== 'not provided') {
+  if (!memberPhone || memberPhone.toLowerCase() === 'test' || memberPhone.toLowerCase() === 'not provided') {
+    memberSmsNote = 'No member phone on request';
+  } else if (!smsConfigured) {
+    memberSmsNote = 'Twilio not configured';
+  } else {
     const sms = await sendTwilioSms(env, {
       to: memberPhone,
-      body: `PEERPoint: your ${modeLabel} is ready. Tap to join (keeps working if you disconnect — room ${room.toUpperCase()}): ${joinUrl}`
+      body: memberRoomReadySms(joinUrl, room)
     });
-    memberSms = sms.ok && sms.sent === true;
-  }
-
-  if (staff) {
-    const phone = staffPhone(staff);
-    if (phone) {
-      const sms = await sendTwilioSms(env, {
-        to: phone,
-        body: `PEERPoint: member ready for ${modeLabel}. Join: ${joinUrl} (room ${room.toUpperCase()})`
-      });
-      staffSms = sms.ok && sms.sent === true;
+    if (sms.ok && sms.sent === true) {
+      memberSms = true;
+    } else if (sms.ok) {
+      memberSmsNote = sms.reason;
+    } else {
+      memberSmsNote = sms.error;
     }
   }
 
-  return {
+  if (!staff) {
+    staffSmsNote = 'No assigned staff profile';
+  } else {
+    const phone = staffPhone(staff);
+    if (!phone) {
+      staffSmsNote = 'No cell/work phone on staff profile';
+    } else if (!smsConfigured) {
+      staffSmsNote = 'Twilio not configured';
+    } else {
+      const sms = await sendTwilioSms(env, {
+        to: phone,
+        body: staffRoomReadySms(joinUrl, room)
+      });
+      if (sms.ok && sms.sent === true) {
+        staffSms = true;
+      } else if (sms.ok) {
+        staffSmsNote = sms.reason;
+      } else {
+        staffSmsNote = sms.error;
+      }
+    }
+  }
+
+  const result: Omit<RoomNotifyResult, 'summary'> = {
     memberEmailed: mailed.memberEmailed,
     staffEmailed: mailed.staffEmailed,
     memberSms,
-    staffSms
+    staffSms,
+    smsConfigured,
+    memberSmsNote,
+    staffSmsNote
   };
+  return { ...result, summary: buildNotifySummary(result) };
 }
 
 /** Alert all Peer Support Leaders (and note when none are configured). */

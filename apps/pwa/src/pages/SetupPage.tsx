@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useActionFeedback, type SuccessToast } from '../components/ActionFeedback';
+import { TwilioPhoneVerify } from '../components/TwilioPhoneVerify';
 import { ADMIN_HOST, isProductionAdminHost } from '../lib/adminHost';
 
 const STAFF_TOKEN_KEY = 'peerpoint_staff_token';
@@ -15,6 +16,9 @@ type InvitePrefill = {
   jobTitle: string;
   email: string;
   role: StaffRole;
+  cellPhone?: string;
+  emailVerified?: boolean;
+  verifyEmailUrl?: string;
 };
 
 export function SetupPage(): React.ReactElement {
@@ -39,6 +43,7 @@ export function SetupPage(): React.ReactElement {
   const [personalEmail, setPersonalEmail] = React.useState('');
   const [workEmail, setWorkEmail] = React.useState('');
   const [sex, setSex] = React.useState<'male' | 'female' | ''>('');
+  const [cellVerified, setCellVerified] = React.useState(false);
 
   React.useEffect(() => {
     if (!token) {
@@ -55,16 +60,35 @@ export function SetupPage(): React.ReactElement {
           setLoadError(data.error ?? 'Invite not found or expired.');
           return;
         }
+        if (!data.emailVerified) {
+          setLoadError(
+            'Please verify your email first. Open the “Verify email” link from your PEERPoint invite, then return here.'
+          );
+          setPrefill({
+            firstName: data.firstName,
+            lastName: data.lastName,
+            bureau: data.bureau,
+            jobTitle: data.jobTitle,
+            email: data.email,
+            role: data.role,
+            emailVerified: false,
+            verifyEmailUrl: data.verifyEmailUrl
+          });
+          return;
+        }
         setPrefill({
           firstName: data.firstName,
           lastName: data.lastName,
           bureau: data.bureau,
           jobTitle: data.jobTitle,
           email: data.email,
-          role: data.role
+          role: data.role,
+          cellPhone: data.cellPhone,
+          emailVerified: true
         });
         setPersonalEmail(data.email);
         setWorkEmail(data.email);
+        if (data.cellPhone) setCellPhone(data.cellPhone);
       } catch {
         if (!cancelled) setLoadError('Could not load invite. Try again later.');
       }
@@ -144,6 +168,11 @@ export function SetupPage(): React.ReactElement {
       <div className="page-shell page-shell-tight">
         <h2>Finish registration</h2>
         <p style={{ color: '#a4262c' }}>{loadError}</p>
+        {prefill?.verifyEmailUrl ? (
+          <p style={{ marginTop: 12 }}>
+            <a href={prefill.verifyEmailUrl}>Verify email now</a>
+          </p>
+        ) : null}
         <p>
           <Link to="/">Back</Link>
         </p>
@@ -218,8 +247,31 @@ export function SetupPage(): React.ReactElement {
         </label>
         <label>
           Cell phone number
-          <input value={cellPhone} onChange={e => setCellPhone(e.target.value)} autoComplete="tel" />
+          <input
+            value={cellPhone}
+            onChange={e => {
+              setCellPhone(e.target.value);
+              setCellVerified(false);
+            }}
+            autoComplete="tel"
+          />
         </label>
+        <TwilioPhoneVerify
+          phone={cellPhone}
+          onPhoneChange={v => {
+            setCellPhone(v);
+            setCellVerified(false);
+          }}
+          inviteToken={token}
+          hidePhoneInput
+          onVerifiedChange={ok => setCellVerified(ok)}
+        />
+        {!cellVerified ? (
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--text)' }}>
+            You can finish registration without verifying, but queue SMS alerts will not reach this
+            number on a Twilio trial until it is verified.
+          </p>
+        ) : null}
         <label>
           Home number
           <input value={homePhone} onChange={e => setHomePhone(e.target.value)} />

@@ -64,7 +64,9 @@ Optional but recommended:
 - **www → apex:** In the zone’s **Rules** (or Pages custom domain settings), redirect `www.mypeerpoint.com` → `https://mypeerpoint.com` so one origin is canonical.
 - **Short.io:** If you still use `slco.to/peerpoint`, set its destination to `https://mypeerpoint.com/` (not `*.pages.dev`).
 
-Production Ably token auth (`VITE_ABLY_AUTH_URL=/api/ably-token`) and Pages Function secrets (`ABLY_API_KEY`, `STAFF_PASSWORD`, etc.) apply to this domain the same as `*.pages.dev`.
+Production Ably token auth (`VITE_ABLY_AUTH_URL=/api/ably-token`) and Pages Function secrets (`ABLY_API_KEY`, `RESEND_API_KEY`, `INVITE_FROM_EMAIL`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, etc.) apply to this domain the same as `*.pages.dev`.
+
+Twilio SMS secrets: from `apps/pwa` run `.\scripts\set-twilio-secrets.ps1` (see [troubleshooting-pwa.md](./troubleshooting-pwa.md#sms-twilioorg)).
 
 ---
 

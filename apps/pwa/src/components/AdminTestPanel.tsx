@@ -10,7 +10,7 @@ type Props = {
 };
 
 /**
- * Admin smoke-test hub: mint rooms, open chat/voice, mic check, content pages.
+ * Admin smoke-test hub: mint rooms, open chat/voice, mic check, content pages, SMS.
  */
 export function AdminTestPanel(props: Props): React.ReactElement {
   const { authHeaders, onAdminHost } = props;
@@ -20,6 +20,42 @@ export function AdminTestPanel(props: Props): React.ReactElement {
   const [roomCode, setRoomCode] = React.useState<string | undefined>();
   const [note, setNote] = React.useState<string | undefined>();
   const [showMic, setShowMic] = React.useState(false);
+  const [smsConfigured, setSmsConfigured] = React.useState<boolean | null>(null);
+  const [smsStatusMsg, setSmsStatusMsg] = React.useState<string | undefined>();
+  const [smsPhone, setSmsPhone] = React.useState('');
+  const [smsBusy, setSmsBusy] = React.useState(false);
+  const [smsError, setSmsError] = React.useState<string | undefined>();
+  const [smsOk, setSmsOk] = React.useState<string | undefined>();
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/staff/sms-test', { headers: authHeaders() });
+        const data = (await res.json().catch(() => ({}))) as {
+          smsConfigured?: boolean;
+          message?: string;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setSmsConfigured(false);
+          setSmsStatusMsg(data.error ?? 'Could not check SMS status.');
+          return;
+        }
+        setSmsConfigured(Boolean(data.smsConfigured));
+        setSmsStatusMsg(data.message);
+      } catch {
+        if (!cancelled) {
+          setSmsConfigured(false);
+          setSmsStatusMsg('Could not check SMS status.');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authHeaders]);
 
   const mintRoom = async (contactMode: 'chat' | 'voice'): Promise<void> => {
     setBusy(true);
@@ -46,6 +82,34 @@ export function AdminTestPanel(props: Props): React.ReactElement {
       setError('Network error creating test room.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const sendSmsTest = async (): Promise<void> => {
+    setSmsBusy(true);
+    setSmsError(undefined);
+    setSmsOk(undefined);
+    try {
+      const res = await fetch('/api/staff/sms-test', {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: smsPhone.trim() })
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        smsConfigured?: boolean;
+      };
+      if (typeof data.smsConfigured === 'boolean') setSmsConfigured(data.smsConfigured);
+      if (!res.ok) {
+        setSmsError(data.error ?? 'Test SMS failed.');
+        return;
+      }
+      setSmsOk(data.message ?? 'Test SMS sent.');
+    } catch {
+      setSmsError('Network error sending test SMS.');
+    } finally {
+      setSmsBusy(false);
     }
   };
 
@@ -97,7 +161,37 @@ export function AdminTestPanel(props: Props): React.ReactElement {
         </article>
 
         <article className="admin-test-card">
-          <h4>2. Mic &amp; speaker</h4>
+          <h4>2. SMS (Twilio)</h4>
+          <p className="admin-test-card__lede">
+            Status:{' '}
+            {smsConfigured === null
+              ? 'Checking…'
+              : smsConfigured
+                ? 'Twilio secrets are set'
+                : 'Not configured — add TWILIO_* secrets on Cloudflare Pages'}
+          </p>
+          {smsStatusMsg ? <p className="admin-test-card__lede">{smsStatusMsg}</p> : null}
+          <label style={{ display: 'block', marginTop: 8, fontSize: 14 }}>
+            Your cell (test recipient)
+            <input
+              value={smsPhone}
+              onChange={e => setSmsPhone(e.target.value)}
+              placeholder="8015551234"
+              autoComplete="tel"
+              style={{ display: 'block', width: '100%', marginTop: 4 }}
+            />
+          </label>
+          <div className="admin-test-card__actions" style={{ marginTop: 10 }}>
+            <button type="button" disabled={smsBusy || !smsPhone.trim()} onClick={() => void sendSmsTest()}>
+              {smsBusy ? 'Sending…' : 'Send test SMS'}
+            </button>
+          </div>
+          {smsError ? <p className="admin-test-card__error">{smsError}</p> : null}
+          {smsOk ? <p style={{ color: 'var(--accent, #0f6a4a)', fontSize: 14 }}>{smsOk}</p> : null}
+        </article>
+
+        <article className="admin-test-card">
+          <h4>3. Mic &amp; speaker</h4>
           <p className="admin-test-card__lede">Verify this device before a voice session. Nothing is sent to a peer.</p>
           {!showMic ? (
             <button type="button" onClick={() => setShowMic(true)}>
@@ -117,7 +211,7 @@ export function AdminTestPanel(props: Props): React.ReactElement {
         </article>
 
         <article className="admin-test-card">
-          <h4>3. Chat &amp; voice screens</h4>
+          <h4>4. Chat &amp; voice screens</h4>
           <p className="admin-test-card__lede">Open the live UI (enter a room code, or create one above first).</p>
           <div className="admin-test-card__actions">
             <Link className="admin-test-link-btn" to="/chat">
@@ -130,7 +224,7 @@ export function AdminTestPanel(props: Props): React.ReactElement {
         </article>
 
         <article className="admin-test-card">
-          <h4>4. Content &amp; member home</h4>
+          <h4>5. Content &amp; member home</h4>
           <p className="admin-test-card__lede">
             Self Help and Resources on this Admin host, or open the public member site.
           </p>
@@ -157,6 +251,7 @@ export function AdminTestPanel(props: Props): React.ReactElement {
           <h4>Suggested checklist</h4>
           <ul className="admin-test-checklist">
             <li>Create test room → copy code</li>
+            <li>Send test SMS (after Twilio secrets are set)</li>
             <li>Open Peer chat in two windows with the same code → send a message</li>
             <li>Open Peer voice with the same code → confirm audio both ways</li>
             <li>Run mic/speaker check on a phone and a desktop</li>

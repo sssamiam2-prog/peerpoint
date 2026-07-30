@@ -156,6 +156,7 @@ export function RequestHelpPage(): React.ReactElement {
     | { roomCode: string; contactMode: 'chat' | 'voice'; joinUrl: string; message: string }
     | undefined
   >();
+  const [showExpectModal, setShowExpectModal] = React.useState(false);
   const [availability, setAvailability] = React.useState<{
     available: boolean;
     maleAvailable: number;
@@ -320,15 +321,28 @@ export function RequestHelpPage(): React.ReactElement {
           return null;
         }
         if (data.roomCode && data.contactMode) {
+          const joinUrl =
+            data.joinUrl ??
+            (data.contactMode === 'voice' ? `/voice?room=${data.roomCode}` : `/chat?room=${data.roomCode}`);
           setImmediateResult({
             roomCode: data.roomCode,
             contactMode: data.contactMode,
-            joinUrl:
-              data.joinUrl ??
-              (data.contactMode === 'voice' ? `/voice?room=${data.roomCode}` : `/chat?room=${data.roomCode}`),
-            message: data.message ?? 'A peer is ready.'
+            joinUrl,
+            message:
+              data.message ??
+              'Your request was sent. Check your text and email for the room code and join link.'
           });
-          return { title: 'Connected', message: `Room code ${data.roomCode} is ready.` };
+          setShowExpectModal(true);
+          if (data.requestId && data.memberJoinToken) {
+            setQueueWait({
+              requestId: data.requestId,
+              memberJoinToken: data.memberJoinToken,
+              contactMode: data.contactMode,
+              status: data.status === 'assigned' ? 'assigned' : 'queued',
+              message: data.message ?? 'Waiting for peer to join…'
+            });
+          }
+          return { title: 'Request sent', message: `Room code ${data.roomCode} is ready.` };
         }
         if (!data.requestId || !data.memberJoinToken || !data.contactMode) {
           setImmediateError(data.error ?? 'Could not start immediate contact.');
@@ -341,10 +355,11 @@ export function RequestHelpPage(): React.ReactElement {
           status: 'queued',
           message:
             data.message ??
-            'Waiting for an on-call peer to accept. Stay on this page — we will show your room code when ready, and email it to you.'
+            'Waiting for an on-call peer. Stay on this page — we will show your room code when ready.'
         });
+        setShowExpectModal(true);
         return {
-          title: 'In the queue',
+          title: 'Request sent',
           message: 'An on-call peer was notified. Keep this page open.'
         };
       } catch {
@@ -392,9 +407,25 @@ export function RequestHelpPage(): React.ReactElement {
             contactMode: mode,
             joinUrl,
             message:
-              'A peer accepted. Check your email for this room code (and a one-tap join link). If you get disconnected, enter the same code to reconnect. Codes expire after 24 hours of no use.'
+              data.message ??
+              'A peer accepted. Use your room code (also sent by text/email). If you disconnect, enter the same code to reconnect.'
           });
           setQueueWait(prev => (prev ? { ...prev, status: 'assigned', message: data.message ?? prev.message } : prev));
+        } else if (data.status === 'queued' && data.room) {
+          const mode = data.contactMode === 'voice' ? 'voice' : queueWait.contactMode;
+          const joinUrl = mode === 'voice' ? `/voice?room=${data.room}` : `/chat?room=${data.room}`;
+          setImmediateResult(prev =>
+            prev?.roomCode === data.room
+              ? prev
+              : {
+                  roomCode: data.room!,
+                  contactMode: mode,
+                  joinUrl,
+                  message:
+                    data.message ??
+                    'Room ready. Check your text for the join link — a peer should join shortly.'
+                }
+          );
         }
       } catch {
         /* keep polling */
@@ -459,7 +490,8 @@ export function RequestHelpPage(): React.ReactElement {
           </button>
         </div>
         <p className="home-form-panel__intro">
-          Choose how you’d like to connect. When a peer accepts, you’ll get a room code by email. Keep this page open.
+          Choose how you’d like to connect. When you request contact, you’ll get a room code by text and email, and a
+          peer will be notified to join.
         </p>
 
         {availability ? (
@@ -806,6 +838,59 @@ export function RequestHelpPage(): React.ReactElement {
             </p>
           ) : null}
         </section>
+      ) : null}
+
+      {showExpectModal ? (
+        <div
+          className="expect-modal-backdrop"
+          role="presentation"
+          onClick={() => setShowExpectModal(false)}
+        >
+          <div
+            className="expect-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="expect-modal-title"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 id="expect-modal-title">What to expect</h2>
+            <ol className="expect-modal__steps">
+              <li>
+                Your request was sent to an on-call Peer Support staff member. They were notified by text and email.
+              </li>
+              <li>
+                You should receive a text (and email) with your <strong>room code</strong> and a link to the private
+                anonymous chat.
+              </li>
+              <li>
+                Tap the link or open Peer chat and enter the room code. Stay on this page or in the chat — your peer
+                should join shortly.
+              </li>
+              <li>
+                This is peer support, not clinical care or emergency services. If you are in crisis, call or text{' '}
+                <strong>988</strong>, or call <strong>911</strong>.
+              </li>
+            </ol>
+            <p className="expect-modal__note">
+              If you get disconnected, use the same room code (or the text link) to rejoin. Codes stay valid for 24 hours
+              of no use.
+            </p>
+            <div className="expect-modal__actions">
+              {immediateResult ? (
+                <Link
+                  className="expect-modal__primary"
+                  to={immediateResult.joinUrl}
+                  onClick={() => setShowExpectModal(false)}
+                >
+                  Open {immediateResult.contactMode === 'voice' ? 'Peer voice' : 'Peer chat'}
+                </Link>
+              ) : null}
+              <button type="button" onClick={() => setShowExpectModal(false)}>
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

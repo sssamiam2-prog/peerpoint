@@ -1,12 +1,13 @@
 import * as Ably from 'ably';
 import type { Message, PresenceMessage } from 'ably';
-import { resolveAblyClientOptions } from './ablyAuth';
+import { resolveAblyClientOptions, resolveModernAblyOptions } from './ablyAuth';
 import type { PeerChatMessage, PeerPresenceMember, PeerTypingPayload } from '../types/chat';
 import { isPeerChatDebugEnabled, peerChatLog, peerChatWarn } from './peerChatDebugLog';
 
 /** Wire event names — must match publish() calls. */
 export const PEER_CHAT_EVENT = 'peer_msg';
 export const PEER_TYPING_EVENT = 'peer_typing';
+export const PEER_CALL_EVENT = 'peer_call';
 
 export function sanitizeAblyApiKey(raw: string): string {
   let s = raw.replace(/^\uFEFF/, '').trim();
@@ -631,4 +632,92 @@ export async function connectPeerChat(
   const managed = await createManagedChat(apiKey, roomCode, displayName, callbacks);
   liveChats.set(managed.mapKey, managed);
   return wrapManaged(managed);
+}
+
+export type PeerSessionOptions = {
+  requestId: string;
+  channelName: string;
+  displayName: string;
+  sessionToken?: string;
+  staffToken?: string;
+  clientId?: string;
+  onMessage: (message: PeerChatMessage) => void;
+  onTyping?: (payload: PeerTypingPayload) => void;
+  onPresence?: (members: PeerPresenceMember[]) => void;
+  onCall?: (payload: Record<string, unknown>) => void;
+  onConnectionState?: (state: Ably.ConnectionState) => void;
+};
+
+export type PeerSessionConnection = AblyChatSession & {
+  publishCall: (payload: Record<string, unknown>) => Promise<void>;
+};
+
+/** Connect to a server-authorized modern support session channel. */
+export async function connectPeerSession(options: PeerSessionOptions): Promise<PeerSessionConnection> {
+  const clientId = options.clientId ?? stableBrowserTabClientId();
+  const client = new Ably.Realtime(
+    resolveModernAblyOptions({
+      requestId: options.requestId,
+      sessionToken: options.sessionToken,
+      staffToken: options.staffToken,
+      clientId
+    })
+  );
+  client.connection.on((change) => options.onConnectionState?.(change.current));
+  await waitForRealtimeConnected(client);
+  const channel = client.channels.get(options.channelName);
+  await channel.attach();
+  const fallback = options.displayName.trim() || 'Anonymous';
+  const onMessage = (message: Message): void => {
+    const parsed = normalizePeerChatPayload(message.data);
+    if (parsed) options.onMessage(parsed);
+  };
+  const onTyping = (message: Message): void => {
+    const parsed = parseTypingPayload(message.data);
+    if (parsed) options.onTyping?.(parsed);
+  };
+  const onCall = (message: Message): void => {
+    const data = unwrapMessageData(message.data);
+    if (data && typeof data === 'object') options.onCall?.(data as Record<string, unknown>);
+  };
+  channel.subscribe(PEER_CHAT_EVENT, onMessage);
+  channel.subscribe(PEER_TYPING_EVENT, onTyping);
+  channel.subscribe(PEER_CALL_EVENT, onCall);
+  let presenceEnabled = false;
+  try {
+    await channel.presence.enter({ name: fallback });
+    presenceEnabled = true;
+    const updatePresence = async (): Promise<void> => {
+      const members = await channel.presence.get();
+      options.onPresence?.(rosterFromPresenceMessages(members, fallback));
+    };
+    channel.presence.subscribe(() => void updatePresence());
+    await updatePresence();
+  } catch {
+    /* presence is optional for a usable session */
+  }
+
+  const publish = async (text: string): Promise<PeerChatMessage | undefined> => {
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    const message = { id: newMessageId(), from: fallback, text: trimmed, at: Date.now() };
+    await channel.publish(PEER_CHAT_EVENT, message);
+    return message;
+  };
+  return {
+    localClientId: clientId,
+    presenceEnabled,
+    channelName: options.channelName,
+    connectionId: client.connection.id ?? null,
+    publish,
+    publishTyping: async (typing) => { await channel.publish(PEER_TYPING_EVENT, { from: fallback, typing }); },
+    publishCall: async (payload) => { await channel.publish(PEER_CALL_EVENT, { ...payload, from: fallback, at: Date.now() }); },
+    close: () => {
+      channel.unsubscribe(PEER_CHAT_EVENT, onMessage);
+      channel.unsubscribe(PEER_TYPING_EVENT, onTyping);
+      channel.unsubscribe(PEER_CALL_EVENT, onCall);
+      if (presenceEnabled) void channel.presence.leave();
+      client.close();
+    }
+  };
 }

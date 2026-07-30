@@ -1,7 +1,7 @@
 {
   "name": "@slco-peer-support/pwa",
   "private": true,
-  "version": "1.2.7",
+  "version": "1.2.31",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,11 +10,13 @@
     "preview": "vite preview",
     "deploy:pages": "npm run build && wrangler pages deploy dist --project-name=peer-support-pwa",
     "pages:dev": "npm run build && wrangler pages dev dist --compatibility-date=2025-04-30",
+    "test:peer-support": "node --test scripts/test-peer-support.mjs",
     "docs:howto": "python scripts/generate-howtos.py",
     "docs:admin-howto": "python scripts/generate-howtos.py"
   },
   "dependencies": {
     "ably": "^2.21.0",
+    "livekit-client": "^2.21.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.9.0"

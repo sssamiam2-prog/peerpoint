@@ -1,5 +1,4 @@
-import { sendOnCallAlertEmail } from '../_lib/email';
-import { notifyLeadersOfCoverageGap } from '../_lib/roomNotify';
+import { emailRoomParticipants, notifyLeadersOfCoverageGap } from '../_lib/roomNotify';
 import {
   availabilityCounts,
   freeInPersonOnCallCandidates,
@@ -8,7 +7,6 @@ import {
   type SexPreference
 } from '../_lib/onCallMatch';
 import { isValidMemberAccessCode } from '../_lib/memberAccess';
-import { MEMBER_ORIGIN } from '../_lib/staffAuth';
 import { loadUsers } from '../_lib/staffAuth';
 import {
   corsHeaders,
@@ -18,6 +16,7 @@ import {
   newId,
   notifyTeams,
   onCallActiveAt,
+  randomRoomCode,
   saveRequests,
   type Env,
   type HelpRequest
@@ -52,7 +51,10 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
         {
           status: 'queued',
           contactMode: item.contactMode,
-          message: 'Waiting for an on-call peer to accept…'
+          room: item.roomCode,
+          message: item.roomCode
+            ? 'Room ready — join with your code. Waiting for the peer to join…'
+            : 'Waiting for an on-call peer to accept…'
         },
         200,
         origin
@@ -139,6 +141,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   const chosen = match.chosen;
   const nowIso = new Date().toISOString();
   const memberJoinToken = newId();
+  const roomCode = randomRoomCode();
   const requesterPhone = String(body.requesterPhone ?? '').trim() || 'not provided';
   const requesterEmail = String(body.requesterEmail ?? '').trim() || 'not-provided@peerpoint.local';
 
@@ -158,30 +161,24 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     assignedPeerUsername: chosen.user.username,
     preferredPeerSex: sexPreference === 'either' ? undefined : sexPreference,
     contactMode,
-    memberJoinToken
+    memberJoinToken,
+    roomCode,
+    roomIssuedAt: nowIso,
+    roomLastUsedAt: nowIso
   };
 
   const list = await loadRequests(env);
   list.unshift(record);
   await saveRequests(env, list.slice(0, 500));
 
-  const staffEmail = chosen.user.workEmail || chosen.user.email || chosen.user.personalEmail || '';
-  let emailed = false;
-  if (staffEmail) {
-    const mail = await sendOnCallAlertEmail(env, {
-      to: staffEmail,
-      staffFirstName: chosen.user.firstName,
-      contactMode,
-      staffUrl: `${MEMBER_ORIGIN}/staff`,
-      preferredSexLabel:
-        sexPreference === 'either' ? 'Either (no preference)' : sexPreference === 'male' ? 'Male' : 'Female'
-    });
-    emailed = mail.ok && mail.emailed === true;
-  }
+  const notified = await emailRoomParticipants(env, record);
+  record.roomNotifySentAt = nowIso;
+  list[0] = record;
+  await saveRequests(env, list.slice(0, 500));
 
   await notifyTeams(
     env,
-    `PEERPoint queued ${contactMode} (${record.id})\nPreferred: ${sexPreference}\nOffered to: ${chosen.user.username}\nEmailed: ${emailed ? 'yes' : 'no'}`
+    `PEERPoint queued ${contactMode} (${record.id})\nPreferred: ${sexPreference}\nOffered to: ${chosen.user.username}\nRoom: ${roomCode}\n${notified.summary}`
   );
 
   return json(
@@ -191,9 +188,13 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
       memberJoinToken,
       contactMode,
       status: 'queued',
-      emailedStaff: emailed,
+      roomCode,
+      emailedStaff: notified.staffEmailed,
+      smsStaff: notified.staffSms,
+      memberSms: notified.memberSms,
+      notifySummary: notified.summary,
       message:
-        'You are in the queue. An on-call peer has been notified. Stay on this page — when they accept, you will get a room code here and by email (use it to reconnect if you disconnect).'
+        'Your request was sent. Check your text and email for the room code and join link — a peer should join shortly.'
     },
     201,
     origin

@@ -1,8 +1,13 @@
 /**
  * Shared On Call matching for peer queue / immediate contact.
+ *
+ * Selection rules:
+ * - Only peers currently on call for remote (chat/voice)
+ * - Skip peers marked Unavailable (in a session / supporting someone)
+ * - Skip peers already offered a waiting queue item or holding an assigned room
+ * - Prefer peers who have taken fewer chat/voice sessions (fair rotation)
  */
 
-import { onCallActiveAt, type OnCallSlot } from './store';
 import { isPeerAvailable } from './peerAvailability';
 import {
   displayNameFor,
@@ -11,8 +16,14 @@ import {
   type StaffSex,
   type StaffUser
 } from './staffAuth';
-import type { Env } from './store';
-import { loadOnCallSlots } from './store';
+import {
+  loadOnCallSlots,
+  loadRequests,
+  onCallActiveAt,
+  type Env,
+  type HelpRequest,
+  type OnCallSlot
+} from './store';
 
 export type SexPreference = StaffSex | 'either';
 
@@ -93,7 +104,58 @@ export function freeInPersonOnCallCandidates(slots: OnCallSlot[], users: StaffUs
   return candidatesFromSlots(slots, users, slotSupportsInPerson);
 }
 
-function sortNextInLine(a: MatchCandidate, b: MatchCandidate): number {
+/** Usernames currently supporting a member (assigned room) or already offered a queue item. */
+export function busyOnCallUsernames(requests: HelpRequest[]): Set<string> {
+  const busy = new Set<string>();
+  for (const r of requests) {
+    const u = String(r.assignedPeerUsername ?? '')
+      .trim()
+      .toLowerCase();
+    if (!u) continue;
+    if (r.status === 'assigned' && r.roomCode) busy.add(u);
+    if (r.status === 'queued') busy.add(u);
+  }
+  return busy;
+}
+
+type SessionLoad = { count: number; lastAt: number };
+
+/** How many chat/voice sessions each peer has taken (accepted or room issued). */
+export function sessionLoadByUsername(requests: HelpRequest[]): Map<string, SessionLoad> {
+  const map = new Map<string, SessionLoad>();
+  for (const r of requests) {
+    const u = String(r.assignedPeerUsername ?? '')
+      .trim()
+      .toLowerCase();
+    if (!u) continue;
+    const isLiveSession =
+      (r.contactMode === 'chat' || r.contactMode === 'voice' || r.preferredContact === 'chat' || r.preferredContact === 'voice') &&
+      Boolean(r.acceptedAt || r.roomIssuedAt);
+    if (!isLiveSession) continue;
+    if (r.status !== 'assigned' && r.status !== 'closed') continue;
+    const at = new Date(r.acceptedAt || r.roomIssuedAt || r.submittedAt).getTime();
+    const prev = map.get(u) ?? { count: 0, lastAt: 0 };
+    map.set(u, {
+      count: prev.count + 1,
+      lastAt: Math.max(prev.lastAt, Number.isFinite(at) ? at : 0)
+    });
+  }
+  return map;
+}
+
+function sortFairNextInLine(
+  a: MatchCandidate,
+  b: MatchCandidate,
+  load: Map<string, SessionLoad>
+): number {
+  const aKey = a.user.username.toLowerCase();
+  const bKey = b.user.username.toLowerCase();
+  const aLoad = load.get(aKey) ?? { count: 0, lastAt: 0 };
+  const bLoad = load.get(bKey) ?? { count: 0, lastAt: 0 };
+  // Prefer peers who have taken fewer sessions (someone who has not yet taken one wins).
+  if (aLoad.count !== bLoad.count) return aLoad.count - bLoad.count;
+  // Then prefer who took one longest ago (or never).
+  if (aLoad.lastAt !== bLoad.lastAt) return aLoad.lastAt - bLoad.lastAt;
   const startDiff = new Date(a.slot.startAt).getTime() - new Date(b.slot.startAt).getTime();
   if (startDiff !== 0) return startDiff;
   const createdDiff = new Date(a.slot.createdAt).getTime() - new Date(b.slot.createdAt).getTime();
@@ -101,24 +163,44 @@ function sortNextInLine(a: MatchCandidate, b: MatchCandidate): number {
   return a.user.username.localeCompare(b.user.username);
 }
 
+export type PickNextOptions = {
+  /** Do not offer to these usernames (e.g. peer who just declined). */
+  excludeUsernames?: string[];
+};
+
 export async function pickNextOnCallPeer(
   env: Env,
-  sexPreference: SexPreference
+  sexPreference: SexPreference,
+  opts: PickNextOptions = {}
 ): Promise<
   | { ok: true; chosen: MatchCandidate; freeCount: number; onCallCount: number }
   | { ok: false; error: string; freeCount: number; onCallCount: number }
 > {
   const slots = onCallActiveAt(await loadOnCallSlots(env));
   const users = await loadUsers(env);
-  const free = freeOnCallCandidates(slots, users);
+  const requests = await loadRequests(env);
+  const busy = busyOnCallUsernames(requests);
+  for (const raw of opts.excludeUsernames ?? []) {
+    const u = String(raw ?? '')
+      .trim()
+      .toLowerCase();
+    if (u) busy.add(u);
+  }
+  const load = sessionLoadByUsername(requests);
+
+  const freeAll = freeOnCallCandidates(slots, users);
+  const free = freeAll.filter(c => !busy.has(c.user.username.toLowerCase()));
   const onCallCount = new Set(slots.filter(slotSupportsRemote).map(s => s.username.toLowerCase())).size;
   const matches = free.filter(c => (sexPreference === 'either' ? true : c.sex === sexPreference));
 
   if (matches.length === 0) {
     let error: string;
-    if (onCallCount > 0 && free.length === 0) {
+    if (onCallCount > 0 && freeAll.length === 0) {
       error =
         'Peers are on call but all are currently marked Unavailable. Try again shortly, or use Request Help for follow-up.';
+    } else if (onCallCount > 0 && free.length === 0) {
+      error =
+        'Peers are on call but all are already in a chat/voice session or waiting on another request. Try again shortly.';
     } else if (sexPreference === 'male') {
       error = 'No male peer is free on call right now. Try Female or Either, or submit a follow-up request.';
     } else if (sexPreference === 'female') {
@@ -129,7 +211,7 @@ export async function pickNextOnCallPeer(
     return { ok: false, error, freeCount: free.length, onCallCount };
   }
 
-  matches.sort(sortNextInLine);
+  matches.sort((a, b) => sortFairNextInLine(a, b, load));
   return { ok: true, chosen: matches[0]!, freeCount: free.length, onCallCount };
 }
 

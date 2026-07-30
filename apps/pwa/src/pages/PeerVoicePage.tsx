@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { ConversationDestroyOverlay } from '../components/ConversationDestroyOverlay';
 import { VoiceCheckModal, loadVoiceDisguisePref } from '../components/VoiceCheckModal';
 import { hasAblyAuthConfigured } from '../lib/ablyAuth';
 import { explainAblyError, normalizeRoomCodeInput, sanitizeAblyApiKey } from '../lib/peerChatAbly';
@@ -57,6 +58,7 @@ export function PeerVoicePage(): React.ReactElement {
   const [uiState, setUiState] = React.useState<PeerVoiceUiState>('waiting');
   const [muted, setMuted] = React.useState(false);
   const [retryNonce, setRetryNonce] = React.useState(0);
+  const [destroying, setDestroying] = React.useState(false);
   const sessionRef = React.useRef<PeerVoiceSessionApi | null>(null);
   const remoteAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const voiceEpochRef = React.useRef(0);
@@ -172,7 +174,12 @@ export function PeerVoicePage(): React.ReactElement {
     if (!fromLink) return;
     const parsed = normalizeRoomCodeInput(fromLink);
     if (!parsed.ok) return;
-    const name = nameInput.trim();
+    const fromJoin = params.get('from') === 'join';
+    let name = nameInput.trim();
+    if (!name && fromJoin) {
+      name = 'Member';
+      setNameInput(name);
+    }
     if (name.length < 1 || name.length > 40) return;
     autoJoinedRef.current = true;
     setRoomInput(parsed.code);
@@ -188,7 +195,7 @@ export function PeerVoicePage(): React.ReactElement {
     setSession({ room: parsed.code, name, disguise });
   }, [disguise, hasKey, nameInput, params, session]);
 
-  const onLeave = (): void => {
+  const finishLeave = React.useCallback((): void => {
     sessionRef.current?.close();
     sessionRef.current = null;
     setSession(null);
@@ -197,6 +204,12 @@ export function PeerVoicePage(): React.ReactElement {
     }
     setStatusLine('');
     setUiState('waiting');
+    setDestroying(false);
+  }, []);
+
+  const onLeave = (): void => {
+    if (destroying) return;
+    setDestroying(true);
   };
 
   const onRetry = (): void => {
@@ -322,6 +335,7 @@ export function PeerVoicePage(): React.ReactElement {
 
   return (
     <div className="page-shell page-shell-wide">
+      {destroying ? <ConversationDestroyOverlay onComplete={finishLeave} /> : null}
       <h2>Peer voice</h2>
       <p style={{ margin: '0 0 8px', fontSize: 14, color: '#5c6e66' }}>
         Room <strong>{session.room}</strong> · You appear as <strong>{session.name}</strong>
@@ -359,7 +373,7 @@ export function PeerVoicePage(): React.ReactElement {
             Reconnect
           </button>
         ) : null}
-        <button type="button" className="btn-ghost" onClick={onLeave}>
+        <button type="button" className="btn-ghost" onClick={onLeave} disabled={destroying}>
           Leave
         </button>
       </div>

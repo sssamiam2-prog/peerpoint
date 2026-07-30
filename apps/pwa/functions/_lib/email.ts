@@ -145,13 +145,15 @@ export async function sendInviteEmail(
   const signInUrl =
     opts.role === 'admin' ? 'https://admin.mypeerpoint.com' : `${MEMBER_ORIGIN}/staff`;
 
-  const subject = `Welcome to PEERPoint — finish your ${roleLabel} registration`;
+  const subject = `Welcome to PEERPoint — verify your email (${roleLabel})`;
   const text = `Hi ${name},
 
 You have been invited to join PEERPoint as ${roleLabel} (Peer Support Member).
 
-1) Finish registering (choose a username and password, and add your contact details):
+1) Verify your email (required before registration):
 ${opts.inviteUrl}
+
+After you verify, we will call your cell to complete SMS phone verification, then you can finish registration.
 
 2) Download your ${howto.label} (PDF):
 ${howto.pdf}
@@ -162,32 +164,120 @@ ${howto.docx}
 After you finish setup, sign in at:
 ${signInUrl}
 
-This invite link expires in 7 days. If you did not expect this email, you can ignore it.
+This verify link expires in 7 days. If you did not expect this email, you can ignore it.
 
 — PEERPoint
 Salt Lake County Sheriff’s Office Peer Support
 `;
 
   const html = brandedEmailShell({
-    title: `You're invited as ${roleLabel}`,
+    title: `Verify your email — ${roleLabel} invite`,
     greetingHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Hi ${escapeHtml(name)},</p>`,
     bodyHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">You have been invited to join <strong>PEERPoint</strong> as <strong>${roleLabel}</strong> (Peer Support Member).</p>
-<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Use the buttons below to finish registration and download your <strong>${escapeHtml(howto.label)}</strong>. Keep the guide handy — it covers signing in, On Call scheduling, requests, notes, and time logging.</p>`,
-    buttonsHtml: `${emailButton(opts.inviteUrl, 'Finish registration', true)}
+<p style="margin:0 0 12px;font-size:15px;line-height:1.5"><strong>Step 1:</strong> Verify this email address. After that, Twilio will call your cell so we can send you SMS alerts on a trial account. Then you finish registration (username and password).</p>
+<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Keep your <strong>${escapeHtml(howto.label)}</strong> handy — it covers signing in, On Call, requests, notes, and time logging.</p>`,
+    buttonsHtml: `${emailButton(opts.inviteUrl, 'Verify email', true)}
 ${emailButton(howto.pdf, `Download ${howto.label} (PDF)`, false)}
 ${emailButton(howto.docx, 'Download Word guide', false)}
 ${emailButton(signInUrl, opts.role === 'admin' ? 'Open Admin site' : 'Open Staff sign-in', false)}`,
-    footerNoteHtml: `<p style="margin:0">This invite expires in <strong>7 days</strong>. If you did not expect this email, you can ignore it.</p>`
+    footerNoteHtml: `<p style="margin:0">This link expires in <strong>7 days</strong>. If you did not expect this email, you can ignore it.</p>`
   });
 
   const result = await sendResendEmail(env, { to: opts.to, subject, text, html });
   if (result.ok && !result.emailed) {
     return {
       ...result,
-      reason: `${result.reason} Share the invite link manually.`
+      reason: `${result.reason} Share the verify link manually.`
     };
   }
   return result;
+}
+
+/** Re-send / account email verification (existing member). */
+export async function sendEmailVerificationEmail(
+  env: Env,
+  opts: { to: string; verifyUrl: string; firstName: string; role: 'admin' | 'staff' }
+): Promise<SendEmailResult> {
+  const roleLabel = opts.role === 'admin' ? 'Admin' : 'Staff';
+  const name = opts.firstName.trim() || 'there';
+  const subject = `PEERPoint — verify your ${roleLabel} email`;
+  const text = `Hi ${name},
+
+Please verify your PEERPoint ${roleLabel} email address:
+${opts.verifyUrl}
+
+After you verify, we will start cell phone verification for SMS alerts (Twilio will call you).
+
+This link expires in 7 days.
+
+— PEERPoint
+`;
+  const html = brandedEmailShell({
+    title: 'Verify your email',
+    greetingHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Hi ${escapeHtml(name)},</p>`,
+    bodyHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Please verify your <strong>PEERPoint ${escapeHtml(roleLabel)}</strong> email. After you confirm, we start cell phone verification so SMS alerts can reach you.</p>`,
+    buttonsHtml: emailButton(opts.verifyUrl, 'Verify email', true),
+    footerNoteHtml: `<p style="margin:0">This link expires in <strong>7 days</strong>.</p>`
+  });
+  return sendResendEmail(env, { to: opts.to, subject, text, html });
+}
+
+/** Email the Twilio keypad code after email is verified (or Admin retriggers phone verify). */
+export async function sendTwilioPhoneVerifyEmail(
+  env: Env,
+  opts: {
+    to: string;
+    firstName: string;
+    phoneE164: string;
+    validationCode: string;
+    continueUrl: string;
+    alreadyVerified?: boolean;
+  }
+): Promise<SendEmailResult> {
+  const name = opts.firstName.trim() || 'there';
+  if (opts.alreadyVerified) {
+    const subject = 'PEERPoint — your cell is already verified for SMS';
+    const text = `Hi ${name},
+
+Your cell ${opts.phoneE164} is already verified for PEERPoint SMS alerts.
+
+Continue here:
+${opts.continueUrl}
+
+— PEERPoint
+`;
+    const html = brandedEmailShell({
+      title: 'Cell already verified',
+      greetingHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Hi ${escapeHtml(name)},</p>`,
+      bodyHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Your cell <strong>${escapeHtml(opts.phoneE164)}</strong> is already verified for PEERPoint SMS alerts.</p>`,
+      buttonsHtml: emailButton(opts.continueUrl, 'Continue', true)
+    });
+    return sendResendEmail(env, { to: opts.to, subject, text, html });
+  }
+
+  const subject = `PEERPoint — enter code ${opts.validationCode} on the Twilio call`;
+  const text = `Hi ${name},
+
+Your email is verified. Twilio is calling ${opts.phoneE164} to verify your cell for SMS alerts.
+
+1) Answer the call
+2) Enter this code on your phone keypad: ${opts.validationCode}
+
+Then continue here:
+${opts.continueUrl}
+
+— PEERPoint
+`;
+  const html = brandedEmailShell({
+    title: 'Verify your cell for SMS',
+    greetingHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Hi ${escapeHtml(name)},</p>`,
+    bodyHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Your email is confirmed. <strong>Twilio is calling</strong> <strong>${escapeHtml(opts.phoneE164)}</strong> now.</p>
+<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Answer and enter this code on your <strong>phone keypad</strong> (not by typing it into a web form):</p>
+<p style="margin:0 0 16px;font-size:28px;letter-spacing:0.2em;font-weight:700;font-variant-numeric:tabular-nums;color:${BRAND_GREEN}">${escapeHtml(opts.validationCode)}</p>`,
+    buttonsHtml: emailButton(opts.continueUrl, 'Continue in PEERPoint', true),
+    footerNoteHtml: `<p style="margin:0">If you miss the call, ask an Admin to retrigger phone verification from the Members list, or use Account → Verify cell in the Staff app.</p>`
+  });
+  return sendResendEmail(env, { to: opts.to, subject, text, html });
 }
 
 /** Alert on-call staff that a member is waiting in the peer queue. */
@@ -397,6 +487,45 @@ ${opts.memberHint ? `<p style="margin:0 0 12px;font-size:14px;color:#555">${esca
     buttonsHtml: emailButton(opts.staffUrl, 'Open Staff queue', true),
     footerNoteHtml: `<p style="margin:0">Leaders are notified when no free on-call peer is available or a peer declines a waiting member.</p>`
   });
+  return sendResendEmail(env, { to: opts.to, subject, text, html });
+}
+
+export async function sendPasswordResetEmail(
+  env: Env,
+  opts: { to: string; resetUrl: string; firstName: string; role: 'admin' | 'staff' }
+): Promise<SendEmailResult> {
+  const roleLabel = opts.role === 'admin' ? 'Admin' : 'Staff';
+  const name = opts.firstName.trim() || 'there';
+  const signInUrl =
+    opts.role === 'admin' ? 'https://admin.mypeerpoint.com' : `${MEMBER_ORIGIN}/staff`;
+
+  const subject = `PEERPoint ${roleLabel} password reset`;
+  const text = `Hi ${name},
+
+We received a request to reset your PEERPoint ${roleLabel} password.
+
+Reset your password (link expires in 1 hour):
+${opts.resetUrl}
+
+If you did not request this, you can ignore this email. Your password will stay the same.
+
+After resetting, sign in at:
+${signInUrl}
+
+— PEERPoint
+Salt Lake County Sheriff’s Office Peer Support
+`;
+
+  const html = brandedEmailShell({
+    title: `Reset your ${roleLabel} password`,
+    greetingHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Hi ${escapeHtml(name)},</p>`,
+    bodyHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">We received a request to reset your <strong>PEERPoint ${escapeHtml(roleLabel)}</strong> password.</p>
+<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Use the button below to choose a new password. This link expires in <strong>1 hour</strong>.</p>`,
+    buttonsHtml: `${emailButton(opts.resetUrl, 'Reset password', true)}
+${emailButton(signInUrl, opts.role === 'admin' ? 'Open Admin sign-in' : 'Open Staff sign-in', false)}`,
+    footerNoteHtml: `<p style="margin:0">If you did not request a password reset, you can ignore this email. Your password will stay the same.</p>`
+  });
+
   return sendResendEmail(env, { to: opts.to, subject, text, html });
 }
 

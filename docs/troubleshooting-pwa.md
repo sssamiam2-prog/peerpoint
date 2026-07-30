@@ -46,6 +46,35 @@ With **`vite-plugin-pwa`**, dev mode may write under `apps/pwa/dev-dist/` (ignor
 - Hard refresh (**Ctrl+Shift+R**) or clear site data for `localhost`.
 - Restart **`npm run dev`**.
 
+## SMS (Twilio.org)
+
+Join-link / alert texts use **Twilio Programmable Messaging** (not Firebase Phone Auth).
+
+**Pages secrets** (project `peer-support-pwa`):
+
+| Secret | Purpose |
+|--------|---------|
+| `TWILIO_ACCOUNT_SID` | Twilio Account SID |
+| `TWILIO_AUTH_TOKEN` | Twilio Auth Token |
+| `TWILIO_FROM_NUMBER` | E.164 From number, e.g. `+18015551234` |
+
+Set them with `apps/pwa/scripts/set-twilio-secrets.ps1` (uses the same Cloudflare credentials as deploy). Confirm with:
+
+```bash
+npx wrangler pages secret list --project-name=peer-support-pwa
+```
+
+**When texts send:** after Staff **Assign** or **Accept** a chat/voice request, PEERPoint emails (Resend) and optionally SMS (Twilio) the member and assigned staff with a `/join` link. Staff toast shows email/SMS delivery flags.
+
+**If SMS does not arrive:**
+1. Secrets missing → Admin **Test App Functions** → SMS shows “Not configured”.
+2. Member phone missing / placeholder (`test`) → member SMS skipped.
+3. Staff profile has no cell/work/home phone → staff SMS skipped.
+4. Twilio trial / A2P / 10DLC restrictions → check Twilio console logs.
+5. Email backup still works when Resend is configured.
+
+**Smoke test:** Admin → Test App Functions → enter your cell → **Send test SMS**.
+
 ## Git and tracking source
 
 - **`apps/pwa/src/lib/`** holds shared helpers (e.g. Ably peer chat). It must **not** be ignored by a blanket `lib/` rule; the repo `.gitignore` scopes build-output `lib` folders instead.

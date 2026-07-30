@@ -19,6 +19,15 @@ export type Env = {
   TWILIO_AUTH_TOKEN?: string;
   /** E.164 Twilio number, e.g. +18015551234 */
   TWILIO_FROM_NUMBER?: string;
+  /**
+   * Optional Twilio trial Body template name (e.g. sms_event_notifications).
+   * Used only when custom PEERPoint SMS is blocked (error 572006).
+   */
+  TWILIO_TRIAL_SMS_TEMPLATE?: string;
+  /** LiveKit server URL and signing credentials. Never expose API secret to clients. */
+  LIVEKIT_URL?: string;
+  LIVEKIT_API_KEY?: string;
+  LIVEKIT_API_SECRET?: string;
 };
 
 export type HelpRequest = {
@@ -49,6 +58,22 @@ export type HelpRequest = {
   roomLastUsedAt?: string;
   /** Opaque token so the member can poll/join without seeing the room code. */
   memberJoinToken?: string;
+  /** Six-digit, display-only identifier for Modern peer-support sessions. */
+  publicSupportCode?: string;
+  /** Opaque identity for an anonymous Modern peer-support session. */
+  anonymousSessionId?: string;
+  sessionKind?: 'classic' | 'modern';
+  /** Ably channel scoped to this Modern peer-support request. */
+  ablyChannelName?: string;
+  /** LiveKit room scoped to this Modern peer-support request. */
+  livekitRoomName?: string;
+  closeReason?: string;
+  closedAt?: string;
+  callState?: string;
+  expiresAt?: string;
+  lastActivityAt?: string;
+  /** ISO time when email/SMS join links were sent (avoid duplicate sends on Accept). */
+  roomNotifySentAt?: string;
   queuedAt?: string;
   acceptedAt?: string;
   /** Display name the member chose for chat/voice. */
@@ -265,6 +290,21 @@ export function randomRoomCode(): string {
   return out;
 }
 
+export function randomPublicSupportCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) out += String(bytes[i]! % 10);
+  return out;
+}
+
+export function ablyChannelForRequest(requestId: string): string {
+  return `peer-support:session:${requestId}`;
+}
+
+export function livekitRoomForRequest(requestId: string): string {
+  return `peer-support-${requestId}`;
+}
+
 function roomActivityMs(r: HelpRequest): number | null {
   const raw = r.roomLastUsedAt || r.roomIssuedAt;
   if (!raw) return null;
@@ -340,13 +380,20 @@ export async function createAblyTokenDetails(
   clientId: string,
   channel: string
 ): Promise<unknown> {
+  return createAblyTokenDetailsForChannels(apiKey, clientId, {
+    [channel]: ['subscribe', 'publish', 'presence', 'history']
+  });
+}
+
+export async function createAblyTokenDetailsForChannels(
+  apiKey: string,
+  clientId: string,
+  capability: Record<string, string[]>
+): Promise<unknown> {
   const colon = apiKey.indexOf(':');
   if (colon < 1) throw new Error('ABLY_API_KEY must be in keyName:keySecret format');
   const keyName = apiKey.slice(0, colon);
   const keySecret = apiKey.slice(colon + 1);
-  const capability = JSON.stringify({
-    [channel]: ['subscribe', 'publish', 'presence', 'history']
-  });
   const basic = btoa(`${keyName}:${keySecret}`);
   const res = await fetch(`https://rest.ably.io/keys/${encodeURIComponent(keyName)}/requestToken`, {
     method: 'POST',
@@ -357,7 +404,7 @@ export async function createAblyTokenDetails(
     },
     body: JSON.stringify({
       clientId,
-      capability,
+      capability: JSON.stringify(capability),
       ttl: 60 * 60 * 1000
     })
   });

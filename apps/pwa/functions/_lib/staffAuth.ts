@@ -7,9 +7,13 @@ import type { Env } from './store';
 const USERS_KEY = 'peerpoint:staff_users';
 const INVITES_INDEX_KEY = 'peerpoint:invites_index';
 const INVITE_PREFIX = 'peerpoint:invite:';
+const RESET_PREFIX = 'peerpoint:pwreset:';
+const EMAIL_VERIFY_PREFIX = 'peerpoint:emailverify:';
 const SESSION_PREFIX = 'peerpoint:session:';
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const RESET_TTL_SECONDS = 60 * 60;
+const EMAIL_VERIFY_TTL_SECONDS = 7 * 24 * 60 * 60;
 const PBKDF2_ITERATIONS = 100_000;
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -37,6 +41,11 @@ export type StaffUser = {
   cellPhone?: string;
   homePhone?: string;
   workPhone?: string;
+  /** E.164 cell on Twilio Outgoing Caller IDs (trial SMS allow-list). */
+  twilioVerifiedPhoneE164?: string;
+  twilioVerifiedAt?: string;
+  /** Set when the member confirms ownership of their invite/work email. */
+  emailVerifiedAt?: string;
   /** @deprecated legacy field — prefer firstName + lastName */
   displayName?: string;
   passwordHash: string;
@@ -79,6 +88,9 @@ export type InviteRecord = {
   jobTitle: string;
   invitedBy: string;
   createdAt: string;
+  /** Cell collected at invite time — used for Twilio after email verify. */
+  cellPhone?: string;
+  emailVerifiedAt?: string;
 };
 
 export type InviteIndexEntry = InviteRecord & { token: string };
@@ -104,6 +116,10 @@ export type PublicStaffAccount = {
   setupComplete: boolean;
   createdAt: string;
   isPeerSupportLeader?: boolean;
+  /** True when cell is on Twilio Verified Caller ID list (needed for trial SMS). */
+  twilioPhoneVerified?: boolean;
+  emailVerified?: boolean;
+  cellPhone?: string;
 };
 
 export type PublicPendingInvite = {
@@ -116,12 +132,31 @@ export type PublicPendingInvite = {
   jobTitle: string;
   createdAt: string;
   invitedBy: string;
+  cellPhone?: string;
+  emailVerified?: boolean;
+};
+
+export type PasswordResetRecord = {
+  username: string;
+  role: StaffRole;
+  email: string;
+  createdAt: string;
+};
+
+/** Short-lived token to re-verify email on an existing account. */
+export type EmailVerifyRecord = {
+  username: string;
+  role: StaffRole;
+  email: string;
+  createdAt: string;
 };
 
 let memoryUsers: StaffUser[] = [];
 const memorySessions = new Map<string, StaffSession>();
 const memoryInvites = new Map<string, InviteRecord>();
 let memoryInviteIndex: InviteIndexEntry[] = [];
+const memoryResets = new Map<string, PasswordResetRecord>();
+const memoryEmailVerifies = new Map<string, EmailVerifyRecord>();
 
 /** Canonical Admin host (production). */
 export const ADMIN_HOST = 'admin.mypeerpoint.com';
@@ -246,6 +281,10 @@ export async function verifyPassword(password: string, saltB64: string, hashB64:
 
 function migrateUser(raw: StaffUser): StaffUser {
   const role: StaffRole = raw.role === 'admin' ? 'admin' : 'staff';
+  const createdAt = raw.createdAt || new Date().toISOString();
+  // Grandfather completed accounts as email-verified (they used the invite inbox).
+  const emailVerifiedAt =
+    raw.emailVerifiedAt || (raw.setupComplete !== false ? createdAt : undefined);
   return {
     ...raw,
     role,
@@ -256,7 +295,8 @@ function migrateUser(raw: StaffUser): StaffUser {
     email: raw.email ?? '',
     active: raw.active !== false,
     setupComplete: raw.setupComplete !== false,
-    createdAt: raw.createdAt || new Date().toISOString()
+    createdAt,
+    emailVerifiedAt
   };
 }
 
@@ -301,12 +341,14 @@ export async function ensureSeedAdmin(env: Env): Promise<void> {
     salt,
     active: true,
     setupComplete: true,
+    emailVerifiedAt: new Date().toISOString(),
     createdAt: new Date().toISOString()
   });
   await saveUsers(env, users);
 }
 
 export function toPublicAccount(u: StaffUser): PublicStaffAccount {
+  const cellE164 = (u.twilioVerifiedPhoneE164 ?? '').trim();
   return {
     username: u.username,
     role: u.role,
@@ -320,7 +362,10 @@ export function toPublicAccount(u: StaffUser): PublicStaffAccount {
     active: u.active,
     setupComplete: u.setupComplete,
     createdAt: u.createdAt,
-    isPeerSupportLeader: u.isPeerSupportLeader === true
+    isPeerSupportLeader: u.isPeerSupportLeader === true,
+    twilioPhoneVerified: Boolean(cellE164),
+    emailVerified: Boolean(u.emailVerifiedAt),
+    cellPhone: (u.cellPhone ?? '').trim() || undefined
   };
 }
 
@@ -425,25 +470,19 @@ export async function listPendingInvites(env: Env): Promise<PublicPendingInvite[
       bureau: live.bureau,
       jobTitle: live.jobTitle,
       createdAt: live.createdAt,
-      invitedBy: live.invitedBy
+      invitedBy: live.invitedBy,
+      cellPhone: live.cellPhone,
+      emailVerified: Boolean(live.emailVerifiedAt)
     });
   }
   // Prune stale index entries
   if (out.length !== index.length) {
-    await saveInviteIndex(
-      env,
-      out.map(p => ({
-        token: p.token,
-        email: p.email,
-        role: p.role,
-        firstName: p.firstName,
-        lastName: p.lastName,
-        bureau: p.bureau,
-        jobTitle: p.jobTitle,
-        invitedBy: p.invitedBy,
-        createdAt: p.createdAt
-      }))
-    );
+    const fresh: InviteIndexEntry[] = [];
+    for (const p of out) {
+      const live = await getInvite(env, p.token);
+      if (live) fresh.push({ ...live, token: p.token });
+    }
+    await saveInviteIndex(env, fresh);
   }
   return out;
 }
@@ -451,6 +490,160 @@ export async function listPendingInvites(env: Env): Promise<PublicPendingInvite[
 export function inviteSetupUrl(token: string, role: StaffRole): string {
   const origin = role === 'admin' ? ADMIN_ORIGIN : MEMBER_ORIGIN;
   return `${origin}/setup?token=${encodeURIComponent(token)}`;
+}
+
+export function inviteVerifyEmailUrl(token: string, role: StaffRole): string {
+  const origin = role === 'admin' ? ADMIN_ORIGIN : MEMBER_ORIGIN;
+  return `${origin}/verify-email?token=${encodeURIComponent(token)}`;
+}
+
+export function accountVerifyEmailUrl(token: string, role: StaffRole): string {
+  const origin = role === 'admin' ? ADMIN_ORIGIN : MEMBER_ORIGIN;
+  return `${origin}/verify-email?accountToken=${encodeURIComponent(token)}`;
+}
+
+/** Persist invite updates (email verified, cell phone) and refresh index entry. */
+export async function saveInvite(env: Env, token: string, invite: InviteRecord): Promise<void> {
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.put(inviteKey(token), JSON.stringify(invite), {
+      expirationTtl: INVITE_TTL_SECONDS
+    });
+  } else {
+    memoryInvites.set(token, invite);
+  }
+  const index = await loadInviteIndex(env);
+  const idx = index.findIndex(e => e.token === token);
+  const entry: InviteIndexEntry = { ...invite, token };
+  if (idx >= 0) index[idx] = entry;
+  else index.push(entry);
+  await saveInviteIndex(env, index);
+}
+
+function emailVerifyKey(token: string): string {
+  return `${EMAIL_VERIFY_PREFIX}${token}`;
+}
+
+export async function createAccountEmailVerify(
+  env: Env,
+  user: StaffUser
+): Promise<{ token: string; record: EmailVerifyRecord; email: string } | { error: string }> {
+  const email = primaryContactEmail(user);
+  if (!email) return { error: 'No email on file for this account.' };
+  if (!user.active) return { error: 'Account is not active.' };
+
+  const token = newOpaqueToken();
+  const record: EmailVerifyRecord = {
+    username: user.username,
+    role: user.role,
+    email: normalizeEmail(email),
+    createdAt: new Date().toISOString()
+  };
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.put(emailVerifyKey(token), JSON.stringify(record), {
+      expirationTtl: EMAIL_VERIFY_TTL_SECONDS
+    });
+  } else {
+    memoryEmailVerifies.set(token, record);
+  }
+  return { token, record, email: record.email };
+}
+
+export async function getAccountEmailVerify(
+  env: Env,
+  token: string
+): Promise<EmailVerifyRecord | null> {
+  if (!token) return null;
+  if (env.PEERPOINT_KV) {
+    const raw = await env.PEERPOINT_KV.get(emailVerifyKey(token));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as EmailVerifyRecord;
+    } catch {
+      return null;
+    }
+  }
+  return memoryEmailVerifies.get(token) ?? null;
+}
+
+export async function deleteAccountEmailVerify(env: Env, token: string): Promise<void> {
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.delete(emailVerifyKey(token));
+    return;
+  }
+  memoryEmailVerifies.delete(token);
+}
+
+function resetKey(token: string): string {
+  return `${RESET_PREFIX}${token}`;
+}
+
+/** Prefer work email, then primary, then personal. */
+export function primaryContactEmail(user: StaffUser): string {
+  return (user.workEmail || user.email || user.personalEmail || '').trim();
+}
+
+export function findUserByUsernameOrEmail(users: StaffUser[], raw: string): StaffUser | undefined {
+  const q = raw.trim().toLowerCase();
+  if (!q) return undefined;
+  const byUser = users.find(u => u.username === normalizeUsername(q));
+  if (byUser) return byUser;
+  const email = normalizeEmail(q);
+  return users.find(u => {
+    const emails = [u.email, u.workEmail, u.personalEmail].map(e => normalizeEmail(e ?? '')).filter(Boolean);
+    return emails.includes(email);
+  });
+}
+
+export async function createPasswordReset(
+  env: Env,
+  user: StaffUser
+): Promise<{ token: string; reset: PasswordResetRecord; email: string } | { error: string }> {
+  const email = primaryContactEmail(user);
+  if (!email) return { error: 'No email on file for this account.' };
+  if (!user.active || !user.setupComplete) return { error: 'Account is not active.' };
+
+  const token = newOpaqueToken();
+  const reset: PasswordResetRecord = {
+    username: user.username,
+    role: user.role,
+    email: normalizeEmail(email),
+    createdAt: new Date().toISOString()
+  };
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.put(resetKey(token), JSON.stringify(reset), {
+      expirationTtl: RESET_TTL_SECONDS
+    });
+  } else {
+    memoryResets.set(token, reset);
+  }
+  return { token, reset, email: reset.email };
+}
+
+export async function getPasswordReset(env: Env, token: string): Promise<PasswordResetRecord | null> {
+  if (!token) return null;
+  if (env.PEERPOINT_KV) {
+    const raw = await env.PEERPOINT_KV.get(resetKey(token));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PasswordResetRecord;
+    } catch {
+      return null;
+    }
+  }
+  return memoryResets.get(token) ?? null;
+}
+
+export async function deletePasswordReset(env: Env, token: string): Promise<void> {
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.delete(resetKey(token));
+    return;
+  }
+  memoryResets.delete(token);
+}
+
+export function passwordResetUrl(token: string, role: StaffRole): string {
+  const origin = role === 'admin' ? ADMIN_ORIGIN : MEMBER_ORIGIN;
+  return `${origin}/reset-password?token=${encodeURIComponent(token)}`;
 }
 
 function sessionKey(token: string): string {
@@ -527,11 +720,15 @@ export async function requireSession(
   return { session, token };
 }
 
+/**
+ * Admin-role session required.
+ * Allowed on the member/installable app (mypeerpoint.com) and the Admin host —
+ * so Windows/desktop PWA Admin login can use Admin APIs without opening the Admin website.
+ */
 export async function requireAdmin(
   request: Request,
   env: Env
 ): Promise<{ session: StaffSession; token: string } | { error: string; status: number }> {
-  if (!isAdminHost(request)) return adminHostRequiredError();
   await ensureSeedAdmin(env);
   const result = await requireSession(request, env);
   if ('error' in result) return result;

@@ -1,13 +1,25 @@
+# Ask crawlers / AI scrapers not to index or archive any response
+/*
+  X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+
 # HTML shell — always revalidate so deploys are not stuck behind CDN/browser cache
 /
   Cache-Control: no-cache, no-store, must-revalidate
   CDN-Cache-Control: no-store
   Cloudflare-CDN-Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex
 
 /index.html
   Cache-Control: no-cache, no-store, must-revalidate
   CDN-Cache-Control: no-store
   Cloudflare-CDN-Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex
+
+/robots.txt
+  Cache-Control: public, max-age=3600, must-revalidate
+  CDN-Cache-Control: public, max-age=3600
 
 # Hashed Vite assets — long cache, but revalidate so a poisoned SPA HTML
 # response for a missing CSS/JS URL cannot stick for a year.

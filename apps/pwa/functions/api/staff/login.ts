@@ -3,9 +3,9 @@ import {
   createSession,
   displayNameFor,
   ensureSeedAdmin,
+  findUserByUsernameOrEmail,
   isProductionAdminHost,
   loadUsers,
-  normalizeUsername,
   verifyPassword
 } from '../../_lib/staffAuth';
 
@@ -17,22 +17,26 @@ export async function onRequestOptions({ request }: Ctx): Promise<Response> {
 
 /**
  * POST /api/staff/login
- * Body: `{ username, password }`
+ * Body: `{ username, password }` — `username` may be username or email on file.
  * - Admin host (production): only Admin-role accounts
  * - Main host: Staff or Admin
  */
 export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   const origin = request.headers.get('Origin');
-  let body: { username?: string; password?: string };
+  let body: { username?: string; password?: string; usernameOrEmail?: string };
   try {
-    body = (await request.json()) as { username?: string; password?: string };
+    body = (await request.json()) as {
+      username?: string;
+      password?: string;
+      usernameOrEmail?: string;
+    };
   } catch {
     return json({ error: 'Invalid JSON.' }, 400, origin);
   }
 
   const password = (body.password ?? '').trim();
-  const username = normalizeUsername(body.username ?? '');
-  if (!username) return json({ error: 'Username is required.' }, 400, origin);
+  const identity = (body.usernameOrEmail ?? body.username ?? '').trim();
+  if (!identity) return json({ error: 'Username or email is required.' }, 400, origin);
   if (!password) return json({ error: 'Password is required.' }, 400, origin);
 
   if (!env.PEERPOINT_KV) {
@@ -48,9 +52,9 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
 
   await ensureSeedAdmin(env);
   const users = await loadUsers(env);
-  const user = users.find(u => u.username === username);
+  const user = findUserByUsernameOrEmail(users, identity);
   if (!user || !user.active || !user.setupComplete) {
-    return json({ error: 'Invalid username or password.' }, 401, origin);
+    return json({ error: 'Invalid username/email or password.' }, 401, origin);
   }
 
   if (isProductionAdminHost(request) && user.role !== 'admin') {
@@ -65,7 +69,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   }
 
   const ok = await verifyPassword(password, user.salt, user.passwordHash);
-  if (!ok) return json({ error: 'Invalid username or password.' }, 401, origin);
+  if (!ok) return json({ error: 'Invalid username/email or password.' }, 401, origin);
 
   const displayName = displayNameFor(user);
   const { token, session } = await createSession(env, {

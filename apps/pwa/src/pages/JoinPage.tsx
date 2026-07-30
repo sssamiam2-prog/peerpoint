@@ -1,8 +1,10 @@
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { grantJoinLinkBypass } from '../lib/memberAccess';
 
 /**
  * Resolves /join?t=TOKEN (or ?token=) to Peer chat/voice with the room filled in.
+ * Skips the site-use code gate and auto-enters the session.
  */
 export function JoinPage(): React.ReactElement {
   const [params] = useSearchParams();
@@ -12,6 +14,18 @@ export function JoinPage(): React.ReactElement {
   const [status, setStatus] = React.useState('Opening your session…');
   const [room, setRoom] = React.useState<string | undefined>();
   const [mode, setMode] = React.useState<'chat' | 'voice' | undefined>();
+
+  const goToSession = React.useCallback(
+    (path: string, nextRoom: string, contactMode: 'chat' | 'voice'): void => {
+      grantJoinLinkBypass(nextRoom);
+      setRoom(nextRoom);
+      setMode(contactMode);
+      // from=join triggers auto-connect with a default display name on chat/voice pages.
+      const sep = path.includes('?') ? '&' : '?';
+      navigate(`${path}${sep}from=join`, { replace: true });
+    },
+    [navigate]
+  );
 
   React.useEffect(() => {
     if (!token) {
@@ -42,10 +56,8 @@ export function JoinPage(): React.ReactElement {
           setStatus('');
           return;
         }
-        setRoom(data.room);
-        setMode(data.contactMode === 'voice' ? 'voice' : 'chat');
         setStatus(data.message ?? 'Connecting…');
-        navigate(data.path, { replace: true });
+        goToSession(data.path, data.room, data.contactMode === 'voice' ? 'voice' : 'chat');
       } catch {
         if (!cancelled) {
           setError('Network error opening this link. Try again or enter your room code manually.');
@@ -56,7 +68,7 @@ export function JoinPage(): React.ReactElement {
     return (): void => {
       cancelled = true;
     };
-  }, [token, navigate]);
+  }, [token, goToSession]);
 
   // Poll while still queued
   React.useEffect(() => {
@@ -74,9 +86,7 @@ export function JoinPage(): React.ReactElement {
             contactMode?: 'chat' | 'voice';
           };
           if (data.status === 'assigned' && data.path && data.room) {
-            setRoom(data.room);
-            setMode(data.contactMode === 'voice' ? 'voice' : 'chat');
-            navigate(data.path, { replace: true });
+            goToSession(data.path, data.room, data.contactMode === 'voice' ? 'voice' : 'chat');
           } else if (data.message) {
             setStatus(data.message);
           }
@@ -86,7 +96,7 @@ export function JoinPage(): React.ReactElement {
       })();
     }, 2500);
     return (): void => window.clearInterval(timer);
-  }, [token, room, error, status, navigate]);
+  }, [token, room, error, status, goToSession]);
 
   return (
     <div className="page-shell page-shell-tight">
@@ -111,7 +121,14 @@ export function JoinPage(): React.ReactElement {
       {room && mode ? (
         <p style={{ fontSize: 14 }}>
           Room <strong>{room}</strong> — if you are not redirected,{' '}
-          <Link to={mode === 'voice' ? `/voice?room=${encodeURIComponent(room)}` : `/chat?room=${encodeURIComponent(room)}`}>
+          <Link
+            to={
+              mode === 'voice'
+                ? `/voice?room=${encodeURIComponent(room)}&from=join`
+                : `/chat?room=${encodeURIComponent(room)}&from=join`
+            }
+            onClick={() => grantJoinLinkBypass(room)}
+          >
             open Peer {mode}
           </Link>
           .

@@ -30,8 +30,8 @@ import {
   markPeerUnavailable,
   sweepUnavailableReminders
 } from '../../_lib/peerAvailability';
-import { normalizeOnCallModality } from '../../_lib/onCallMatch';
-import { emailRoomParticipants, notifyLeadersOfCoverageGap } from '../../_lib/roomNotify';
+import { normalizeOnCallModality, pickNextOnCallPeer, type SexPreference } from '../../_lib/onCallMatch';
+import { emailRoomParticipants, notifyLeadersOfCoverageGap, notifyOnCallPeerWaiting } from '../../_lib/roomNotify';
 
 type Ctx = { request: Request; env: Env; waitUntil?: (p: Promise<unknown>) => void };
 
@@ -317,7 +317,13 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     if (item.assignedPeerUsername) {
       await markPeerUnavailable(env, item.assignedPeerUsername, 'supporting a peer (assigned request)');
     }
-    const emailed = await emailRoomParticipants(env, item);
+    let emailed: Awaited<ReturnType<typeof emailRoomParticipants>> | undefined;
+    if (!item.roomNotifySentAt) {
+      emailed = await emailRoomParticipants(env, item);
+      item.roomNotifySentAt = nowIso;
+      list[idx] = item;
+      await saveRequests(env, list);
+    }
     return json({ ok: true, request: item, emailed }, 200, origin);
   }
 
@@ -345,7 +351,13 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     if (item.assignedPeerUsername) {
       await markPeerUnavailable(env, item.assignedPeerUsername, `supporting a peer (${item.contactMode || 'chat'})`);
     }
-    const emailed = await emailRoomParticipants(env, item);
+    let emailed: Awaited<ReturnType<typeof emailRoomParticipants>> | undefined;
+    if (!item.roomNotifySentAt) {
+      emailed = await emailRoomParticipants(env, item);
+      item.roomNotifySentAt = nowIso;
+      list[idx] = item;
+      await saveRequests(env, list);
+    }
     return json(
       {
         ok: true,
@@ -353,7 +365,14 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
         roomCode: item.roomCode,
         contactMode: item.contactMode === 'voice' ? 'voice' : 'chat',
         joinPath: item.contactMode === 'voice' ? `/voice?room=${item.roomCode}` : `/chat?room=${item.roomCode}`,
-        emailed
+        emailed: emailed ?? {
+          memberEmailed: false,
+          staffEmailed: false,
+          memberSms: false,
+          staffSms: false,
+          smsConfigured: false,
+          summary: 'Join links already sent when the request was created.'
+        }
       },
       200,
       origin
@@ -369,6 +388,53 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     if (auth.session.role !== 'admin' && offered !== me) {
       return json({ error: 'This queue request was offered to another peer.' }, 403, origin);
     }
+
+    const sexPreference: SexPreference =
+      item.preferredPeerSex === 'male' || item.preferredPeerSex === 'female'
+        ? item.preferredPeerSex
+        : 'either';
+    const contactMode = item.contactMode === 'voice' ? 'voice' : 'chat';
+    const preferredSexLabel =
+      sexPreference === 'either' ? 'Either (no preference)' : sexPreference === 'male' ? 'Male' : 'Female';
+
+    // Try next free on-call peer (skip declining peer + anyone already busy).
+    const next = await pickNextOnCallPeer(env, sexPreference, {
+      excludeUsernames: [auth.session.username, item.assignedPeerUsername].filter(Boolean) as string[]
+    });
+
+    if (next.ok) {
+      item.assignedPeer = next.chosen.displayName;
+      item.assignedPeerUsername = next.chosen.user.username;
+      item.queuedAt = new Date().toISOString();
+      list[idx] = item;
+      await saveRequests(env, list);
+      let alert: Awaited<ReturnType<typeof notifyOnCallPeerWaiting>> | Awaited<ReturnType<typeof emailRoomParticipants>>;
+      if (item.roomCode && item.memberJoinToken) {
+        // Room already exists — text the next peer the join link (skip re-texting the member).
+        const staffOnly = { ...item };
+        staffOnly.requesterPhone = 'not provided';
+        staffOnly.requesterEmail = 'not-provided@peerpoint.local';
+        alert = await emailRoomParticipants(env, staffOnly);
+      } else {
+        alert = await notifyOnCallPeerWaiting(env, {
+          staff: next.chosen.user,
+          contactMode,
+          preferredSexLabel
+        });
+      }
+      return json(
+        {
+          ok: true,
+          reoffered: true,
+          request: item,
+          nextPeer: next.chosen.displayName,
+          notify: alert
+        },
+        200,
+        origin
+      );
+    }
+
     item.status = 'closed';
     item.roomCode = undefined;
     item.roomIssuedAt = undefined;
@@ -376,13 +442,13 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     list[idx] = item;
     await saveRequests(env, list);
     const leader = await notifyLeadersOfCoverageGap(env, {
-      reason: `On-call peer declined a waiting ${item.contactMode === 'voice' ? 'voice' : 'chat'} request.`,
-      contactMode: item.contactMode === 'voice' ? 'voice' : 'chat',
+      reason: `On-call peer declined a waiting ${contactMode} request and no other free peer was available.`,
+      contactMode,
       memberHint: item.requesterName
         ? `Member display name on file: ${item.requesterName}`
         : 'Member was waiting in the peer queue.'
     });
-    return json({ ok: true, request: item, leaders: leader }, 200, origin);
+    return json({ ok: true, reoffered: false, request: item, leaders: leader }, 200, origin);
   }
 
   if (body.action === 'close') {
