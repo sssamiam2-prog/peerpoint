@@ -21,11 +21,13 @@
   Cache-Control: public, max-age=3600, must-revalidate
   CDN-Cache-Control: public, max-age=3600
 
-# Hashed Vite assets — long cache, but revalidate so a poisoned SPA HTML
-# response for a missing CSS/JS URL cannot stick for a year.
+# Hashed Vite assets — never let CDN keep a mistaken HTML fallback for a .js/.css URL.
+# (Custom domains have been observed caching SPA HTML for missing/racing asset hashes.)
 /assets/*
-  Cache-Control: public, max-age=86400, must-revalidate
-  CDN-Cache-Control: public, max-age=86400, stale-while-revalidate=60
+  Cache-Control: public, max-age=3600, must-revalidate
+  CDN-Cache-Control: no-store
+  Cloudflare-CDN-Cache-Control: no-store
+  X-Content-Type-Options: nosniff
 
 # Service worker must never be cached stale
 /sw.js
