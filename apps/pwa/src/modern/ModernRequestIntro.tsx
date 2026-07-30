@@ -10,10 +10,12 @@ export function ModernRequestIntro(): React.ReactElement {
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/peer-support/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteUseCode: getStoredSiteUseCode() }) });
-      const data = await response.json() as { requestId?: string; anonymousSessionToken?: string; sessionToken?: string; publicSupportCode?: string; supportCode?: string };
+      const data = await response.json() as { requestId?: string; anonymousSessionToken?: string; sessionToken?: string; publicSupportCode?: string; supportCode?: string; error?: string };
       const token = data.anonymousSessionToken ?? data.sessionToken;
       const code = data.publicSupportCode ?? data.supportCode;
-      if (!response.ok || !data.requestId || !token || !code) throw new Error('Could not start a support session.');
+      if (!response.ok || !data.requestId || !token || !code) {
+        throw new Error(data.error || 'Could not start a support session.');
+      }
       saveModernSession({ requestId: data.requestId, anonymousSessionToken: token, publicSupportCode: code });
       navigate('/m/waiting');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not start a support session.'); }
