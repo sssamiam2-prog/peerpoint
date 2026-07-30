@@ -3147,7 +3147,11 @@ a.crisis-modal__call-btn {
   justify-content: center;
   background: rgba(255, 255, 255, 0.07);
   color: #fff !important;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-weight: 700;
+}
+.modern-secondary::after {
+  content: none;
 }
 .modern-crisis-card {
   display: grid;
@@ -3185,8 +3189,28 @@ a.crisis-modal__call-btn {
 }
 .modern-nav span { font-size: 1.25rem; }
 .modern-nav a.active { color: var(--modern-gold-soft); }
-.modern-feature-list { display: grid; gap: 12px; margin: 26px 0; }
-.modern-feature-list div,
+/* Info statements — not button-shaped */
+.modern-feature-list {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0 8px;
+  padding: 4px 0 4px 14px;
+  border-left: 2px solid rgba(201, 162, 39, 0.45);
+  background: transparent;
+  list-style: none;
+}
+.modern-feature-list b {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #f4f7fb;
+}
+.modern-feature-list span {
+  color: var(--modern-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+/* Settings / nav rows — interactive, but distinct from primary CTAs */
 .modern-settings > div,
 .modern-settings > a {
   display: grid;
@@ -3198,7 +3222,19 @@ a.crisis-modal__call-btn {
   color: #fff;
   text-decoration: none;
 }
-.modern-feature-list span,
+.modern-settings > a {
+  position: relative;
+  padding-right: 36px;
+}
+.modern-settings > a::after {
+  content: '→';
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--modern-gold-soft);
+  font-size: 1.1rem;
+}
 .modern-settings span { color: var(--modern-muted); font-size: 0.9rem; }
 .modern-settings { display: grid; gap: 12px; }
 .modern-settings button {

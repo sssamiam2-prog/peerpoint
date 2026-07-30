@@ -48,20 +48,20 @@ export function ModernRequestIntro(): React.ReactElement {
       <ModernBackButton to="/" label="Back" />
       <p className="modern-eyebrow">PEERPOINT</p>
       <h1>Asking for support is a strength.</h1>
-      <div className="modern-feature-list">
-        <div>
+      <ul className="modern-feature-list" aria-label="What to expect">
+        <li>
           <b>Confidential</b>
           <span>Your identity is kept private.</span>
-        </div>
-        <div>
+        </li>
+        <li>
           <b>Trained peers</b>
           <span>Connect with trained support staff.</span>
-        </div>
-        <div>
+        </li>
+        <li>
           <b>No judgment</b>
           <span>A space to talk, your way.</span>
-        </div>
-      </div>
+        </li>
+      </ul>
       {error ? <p className="modern-error">{error}</p> : null}
       <button className="modern-primary" type="button" onClick={() => void begin()} disabled={busy}>
         {busy ? 'Starting…' : 'Continue →'}
