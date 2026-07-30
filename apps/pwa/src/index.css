@@ -3199,6 +3199,10 @@ a.crisis-modal__call-btn {
   background: transparent;
   list-style: none;
 }
+.modern-feature-list li {
+  display: grid;
+  gap: 2px;
+}
 .modern-feature-list b {
   font-size: 0.98rem;
   font-weight: 700;
