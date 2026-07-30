@@ -1,4 +1,5 @@
 import { sendLeaderFallbackEmail, sendOnCallAlertEmail, sendRoomConnectEmails } from '../_lib/email';
+import { isStaffNotifyPaused } from '../_lib/notifyPause';
 import { isTwilioSmsConfigured, sendTwilioSms } from '../_lib/sms';
 import type { Env, HelpRequest } from '../_lib/store';
 import { notifyTeams } from '../_lib/store';
@@ -82,9 +83,20 @@ export async function notifyOnCallPeerWaiting(
   const staffUrl = `${MEMBER_ORIGIN}/staff`;
   const modeLabel = opts.contactMode === 'voice' ? 'voice call' : 'chat';
   const smsConfigured = isTwilioSmsConfigured(env);
+  const paused = isStaffNotifyPaused(env);
   let emailed = false;
   let sms = false;
   let smsNote: string | undefined;
+
+  if (paused) {
+    return {
+      emailed: false,
+      sms: false,
+      smsConfigured,
+      smsNote: 'Staff notifications paused',
+      summary: 'Staff email/SMS paused (PEERPOINT_PAUSE_STAFF_NOTIFY)'
+    };
+  }
 
   const toEmail = staffEmail(opts.staff);
   if (toEmail) {
@@ -201,6 +213,8 @@ export async function emailRoomParticipants(
 
   if (!staff) {
     staffSmsNote = 'No assigned staff profile';
+  } else if (isStaffNotifyPaused(env)) {
+    staffSmsNote = 'Staff notifications paused';
   } else {
     const phone = staffPhone(staff);
     if (!phone) {
@@ -224,7 +238,7 @@ export async function emailRoomParticipants(
 
   const result: Omit<RoomNotifyResult, 'summary'> = {
     memberEmailed: mailed.memberEmailed,
-    staffEmailed: mailed.staffEmailed,
+    staffEmailed: isStaffNotifyPaused(env) ? false : mailed.staffEmailed,
     memberSms,
     staffSms,
     smsConfigured,
@@ -246,6 +260,14 @@ export async function notifyLeadersOfCoverageGap(
   const leaders = await loadPeerSupportLeaders(env);
   let leadersNotified = 0;
   const staffUrl = `${MEMBER_ORIGIN}/staff`;
+
+  if (isStaffNotifyPaused(env)) {
+    await notifyTeams(
+      env,
+      `PEERPoint Leader alert (email paused)\n${opts.reason}\nLeaders configured: ${leaders.length}\nEmailed: 0`
+    );
+    return { leadersNotified: 0, leaderCount: leaders.length };
+  }
 
   for (const leader of leaders) {
     const to = staffEmail(leader);

@@ -5,6 +5,7 @@
 
 import type { Env } from './store';
 import { MEMBER_ORIGIN } from './staffAuth';
+import { isStaffNotifyPaused } from './notifyPause';
 
 export type SendEmailResult =
   | { ok: true; emailed: true }
@@ -19,8 +20,15 @@ const LOGO_URL = `${MEMBER_ORIGIN}/peerpoint-logo.png`;
 
 async function sendResendEmail(
   env: Env,
-  opts: { to: string; subject: string; text: string; html: string }
+  opts: { to: string; subject: string; text: string; html: string; staffFacing?: boolean }
 ): Promise<SendEmailResult> {
+  if (opts.staffFacing && isStaffNotifyPaused(env)) {
+    return {
+      ok: true,
+      emailed: false,
+      reason: 'Staff email paused (PEERPOINT_PAUSE_STAFF_NOTIFY).'
+    };
+  }
   const apiKey = env.RESEND_API_KEY?.trim();
   const from = env.INVITE_FROM_EMAIL?.trim();
   if (!apiKey || !from) {
@@ -183,7 +191,7 @@ ${emailButton(signInUrl, opts.role === 'admin' ? 'Open Admin site' : 'Open Staff
     footerNoteHtml: `<p style="margin:0">This link expires in <strong>7 days</strong>. If you did not expect this email, you can ignore it.</p>`
   });
 
-  const result = await sendResendEmail(env, { to: opts.to, subject, text, html });
+  const result = await sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
   if (result.ok && !result.emailed) {
     return {
       ...result,
@@ -219,7 +227,7 @@ This link expires in 7 days.
     buttonsHtml: emailButton(opts.verifyUrl, 'Verify email', true),
     footerNoteHtml: `<p style="margin:0">This link expires in <strong>7 days</strong>.</p>`
   });
-  return sendResendEmail(env, { to: opts.to, subject, text, html });
+  return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
 }
 
 /** Email the Twilio keypad code after email is verified (or Admin retriggers phone verify). */
@@ -252,7 +260,7 @@ ${opts.continueUrl}
       bodyHtml: `<p style="margin:0 0 12px;font-size:15px;line-height:1.5">Your cell <strong>${escapeHtml(opts.phoneE164)}</strong> is already verified for PEERPoint SMS alerts.</p>`,
       buttonsHtml: emailButton(opts.continueUrl, 'Continue', true)
     });
-    return sendResendEmail(env, { to: opts.to, subject, text, html });
+    return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
   }
 
   const subject = `PEERPoint — enter code ${opts.validationCode} on the Twilio call`;
@@ -277,7 +285,7 @@ ${opts.continueUrl}
     buttonsHtml: emailButton(opts.continueUrl, 'Continue in PEERPoint', true),
     footerNoteHtml: `<p style="margin:0">If you miss the call, ask an Admin to retrigger phone verification from the Members list, or use Account → Verify cell in the Staff app.</p>`
   });
-  return sendResendEmail(env, { to: opts.to, subject, text, html });
+  return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
 }
 
 /** Alert on-call staff that a member is waiting in the peer queue. */
@@ -315,7 +323,7 @@ ${opts.staffUrl}
     footerNoteHtml: `<p style="margin:0">If you cannot take this request, decline in the Staff app so another on-call peer can be tried.</p>`
   });
 
-  return sendResendEmail(env, { to: opts.to, subject, text, html });
+  return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
 }
 
 /** Half-hour reminder while a Peer Support Member remains marked unavailable. */
@@ -353,7 +361,7 @@ ${staffUrl}
     footerNoteHtml: `<p style="margin:0">You will get this reminder about every 30 minutes until you mark yourself available.</p>`
   });
 
-  return sendResendEmail(env, { to: opts.to, subject, text, html });
+  return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
 }
 
 /** Email member + staff with room code, token join links, and reconnect instructions. */
@@ -444,7 +452,7 @@ Staff home: ${staffUrl}
       buttonsHtml: `${emailButton(joinUrl, `Join ${modeLabel}`, true)}${emailButton(staffUrl, 'Open Staff', false)}`,
       footerNoteHtml: `<p style="margin:0">When finished, mark yourself Available again in the Staff app if you were set Unavailable.</p>`
     });
-    const r = await sendResendEmail(env, { to: staffTo, subject, text, html });
+    const r = await sendResendEmail(env, { to: staffTo, subject, text, html, staffFacing: true });
     staffEmailed = r.ok && r.emailed === true;
   }
 
@@ -487,7 +495,7 @@ ${opts.memberHint ? `<p style="margin:0 0 12px;font-size:14px;color:#555">${esca
     buttonsHtml: emailButton(opts.staffUrl, 'Open Staff queue', true),
     footerNoteHtml: `<p style="margin:0">Leaders are notified when no free on-call peer is available or a peer declines a waiting member.</p>`
   });
-  return sendResendEmail(env, { to: opts.to, subject, text, html });
+  return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
 }
 
 export async function sendPasswordResetEmail(
@@ -526,7 +534,7 @@ ${emailButton(signInUrl, opts.role === 'admin' ? 'Open Admin sign-in' : 'Open St
     footerNoteHtml: `<p style="margin:0">If you did not request a password reset, you can ignore this email. Your password will stay the same.</p>`
   });
 
-  return sendResendEmail(env, { to: opts.to, subject, text, html });
+  return sendResendEmail(env, { to: opts.to, subject, text, html, staffFacing: true });
 }
 
 function escapeHtml(s: string): string {

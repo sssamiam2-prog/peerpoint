@@ -4,6 +4,7 @@
  */
 
 import { sendUnavailableReminderEmail } from './email';
+import { isStaffNotifyPaused } from './notifyPause';
 import type { Env } from './store';
 import {
   displayNameFor,
@@ -66,6 +67,9 @@ export type ReminderSweepResult = {
 
 /** Email anyone still marked unavailable at least every 30 minutes. */
 export async function sweepUnavailableReminders(env: Env): Promise<ReminderSweepResult> {
+  if (isStaffNotifyPaused(env)) {
+    return { checked: 0, reminded: 0, errors: 0 };
+  }
   const users = await loadUsers(env);
   const now = Date.now();
   let reminded = 0;

@@ -28,6 +28,11 @@ export type Env = {
   LIVEKIT_URL?: string;
   LIVEKIT_API_KEY?: string;
   LIVEKIT_API_SECRET?: string;
+  /**
+   * Pause all email/SMS to Peer Support staff.
+   * Default when unset: paused. Set to "0" to re-enable.
+   */
+  PEERPOINT_PAUSE_STAFF_NOTIFY?: string;
 };
 
 export type HelpRequest = {
@@ -47,6 +52,10 @@ export type HelpRequest = {
   assignedPeerUsername?: string;
   /** Member preference for immediate contact. */
   preferredPeerSex?: 'male' | 'female';
+  /** Member match mode: anyone | specific person | civilian/sworn. */
+  matchMode?: 'anyone' | 'specific' | 'classification';
+  preferredPeerUsername?: string;
+  preferredPeerClassification?: 'civilian' | 'sworn';
   contactMode?: 'chat' | 'voice' | 'form' | 'faceToFace';
   /** Self-attested current SLCOSO employment (no employee ID stored). */
   employmentAttested?: boolean;
