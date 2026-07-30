@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { ActionFeedbackProvider } from './components/ActionFeedback';
 import { CrisisStrip } from './components/CrisisStrip';
 import { InstallAppButton } from './components/InstallAppButton';
@@ -241,6 +241,16 @@ function Layout(props: { children: React.ReactNode }): React.ReactElement {
   return shell;
 }
 
+function ModernMemberLayout(): React.ReactElement {
+  return (
+    <MemberAccessGate>
+      <ModernShell>
+        <Outlet />
+      </ModernShell>
+    </MemberAccessGate>
+  );
+}
+
 function ModernRoutes(): React.ReactElement {
   return (
     <Routes>
@@ -253,7 +263,7 @@ function ModernRoutes(): React.ReactElement {
       <Route path="/staff" element={<ModernStaffRequests />} />
       <Route path="/m/staff" element={<ModernStaffRequests />} />
       <Route path="/m/staff/chat" element={<ModernStaffChat />} />
-      <Route path="*" element={<MemberAccessGate><ModernShell><Routes>
+      <Route element={<ModernMemberLayout />}>
         <Route path="/" element={<ModernHome />} />
         <Route path="/m/request" element={<ModernRequestIntro />} />
         <Route path="/m/waiting" element={<ModernWaiting />} />
@@ -265,7 +275,7 @@ function ModernRoutes(): React.ReactElement {
         <Route path="/resources" element={<Navigate to="/m/resources" replace />} />
         <Route path="/more" element={<Navigate to="/m/more" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes></ModernShell></MemberAccessGate>} />
+      </Route>
     </Routes>
   );
 }

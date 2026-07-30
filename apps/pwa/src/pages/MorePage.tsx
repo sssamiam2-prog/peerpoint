@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { InstallAppButton } from '../components/InstallAppButton';
 import { isStandaloneDisplay } from '../lib/pwaInstall';
 import { setUiMode } from '../lib/uiMode';
@@ -7,6 +7,7 @@ import { setUiMode } from '../lib/uiMode';
 /** Secondary destinations kept out of the main crisis nav. */
 export function MorePage(): React.ReactElement {
   const installed = isStandaloneDisplay();
+  const navigate = useNavigate();
 
   return (
     <div className="page-shell more-page">
@@ -37,7 +38,14 @@ export function MorePage(): React.ReactElement {
       <section className="more-page__install" aria-labelledby="ui-mode-heading">
         <h3 id="ui-mode-heading">Interface</h3>
         <p className="more-page__install-note">Try the new PEERPoint experience with session-based peer support.</p>
-        <button type="button" className="btn-ghost" onClick={() => setUiMode('modern')}>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => {
+            setUiMode('modern');
+            navigate('/');
+          }}
+        >
           Use Modern UI
         </button>
       </section>
