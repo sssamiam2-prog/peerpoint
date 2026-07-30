@@ -3,7 +3,7 @@ import { ModernBrandMark } from './ModernBrandMark';
 
 export function ModernHome(): React.ReactElement {
   return (
-    <section className="modern-home">
+    <section className="modern-home modern-home--fit">
       <ModernBrandMark size="hero" />
       <div className="modern-hero">
         <p className="modern-eyebrow">PEERPOINT · CONFIDENTIAL</p>
@@ -12,7 +12,10 @@ export function ModernHome(): React.ReactElement {
           <span className="modern-brand-title__point">POINT</span>
         </h1>
         <p className="modern-hero-tagline">Stronger together — always here.</p>
-        <p>You’re not alone. Connect with trained peer support staff when you need someone who understands.</p>
+        <Link className="modern-crisis-card" to="/m/resources#crisis">
+          <strong>Emergency resources</strong>
+          <span>In immediate danger, call 911. Call or text 988 for crisis support. →</span>
+        </Link>
         <Link className="modern-primary" to="/m/request">
           Request Peer Support <span>→</span>
         </Link>
@@ -20,10 +23,6 @@ export function ModernHome(): React.ReactElement {
           I’m OK for Now
         </Link>
       </div>
-      <Link className="modern-crisis-card" to="/m/resources#crisis">
-        <strong>Emergency resources</strong>
-        <span>If you are in immediate danger, call 911. Call or text 988 for crisis support. →</span>
-      </Link>
     </section>
   );
 }

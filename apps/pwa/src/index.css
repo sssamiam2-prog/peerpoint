@@ -3133,6 +3133,115 @@ a.crisis-modal__call-btn {
 .modern-main { width: min(680px, 100%); margin: auto; }
 .modern-page, .modern-home, .modern-chat { padding: 20px 20px 28px; }
 
+/* Home: keep brand + emergency + CTAs in one phone viewport (above bottom nav) */
+.modern-home--fit {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 84px - env(safe-area-inset-bottom, 0px));
+  padding: 12px 16px 10px;
+  overflow: hidden;
+}
+.modern-home--fit .modern-brand-hero {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 14px;
+  flex-shrink: 0;
+}
+.modern-home--fit .modern-logo {
+  width: min(220px, 68%);
+}
+.modern-home--fit .modern-hero {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  padding: 14px 14px 16px;
+  border-radius: 18px;
+  min-height: 0;
+}
+.modern-home--fit .modern-eyebrow {
+  margin: 0 0 4px !important;
+  font-size: 0.65rem !important;
+}
+.modern-home--fit .modern-brand-title {
+  margin: 0 0 4px !important;
+  font-size: clamp(1.7rem, 7.5vw, 2.35rem) !important;
+}
+.modern-home--fit .modern-hero-tagline {
+  margin: 0 0 10px !important;
+  font-size: 0.85rem !important;
+}
+.modern-home--fit .modern-crisis-card {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  order: 0;
+}
+.modern-home--fit .modern-crisis-card span {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.modern-home--fit .modern-primary,
+.modern-home--fit .modern-secondary {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+}
+.modern-home--fit .modern-primary span {
+  font-size: 1.2rem;
+}
+
+@media (min-height: 780px) {
+  .modern-home--fit .modern-logo {
+    width: min(280px, 75%);
+  }
+  .modern-home--fit .modern-brand-hero {
+    padding: 12px 14px;
+  }
+  .modern-home--fit .modern-brand-title {
+    font-size: clamp(2rem, 8vw, 2.8rem) !important;
+  }
+}
+
+@media (max-height: 640px) {
+  .modern-home--fit {
+    padding: 8px 12px 6px;
+    gap: 6px;
+  }
+  .modern-home--fit .modern-brand-hero {
+    padding: 4px 8px;
+  }
+  .modern-home--fit .modern-logo {
+    width: min(160px, 52%);
+  }
+  .modern-home--fit .modern-hero {
+    padding: 10px 12px 12px;
+  }
+  .modern-home--fit .modern-brand-title {
+    font-size: 1.45rem !important;
+  }
+  .modern-home--fit .modern-hero-tagline {
+    margin: 0 0 6px !important;
+    font-size: 0.78rem !important;
+  }
+  .modern-home--fit .modern-crisis-card {
+    margin-bottom: 6px;
+    padding: 8px 10px;
+  }
+  .modern-home--fit .modern-primary,
+  .modern-home--fit .modern-secondary {
+    margin-top: 6px;
+    padding: 10px 12px;
+    font-size: 0.88rem;
+  }
+}
+
 .modern-shell-brand {
   width: min(680px, 100%);
   margin: 0 auto;
@@ -3268,6 +3377,9 @@ a.crisis-modal__call-btn {
   border: 1px solid #9d506b;
   color: #fff;
   text-decoration: none;
+}
+.modern-hero .modern-crisis-card {
+  margin-top: 0;
 }
 .modern-crisis-card span { font-size: 0.88rem; color: #edc7d2; }
 .modern-nav {
