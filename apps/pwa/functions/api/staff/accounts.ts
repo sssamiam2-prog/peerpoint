@@ -58,6 +58,7 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
 /**
  * POST /api/staff/accounts — invite a Peer Support Member
  * Body: { firstName, lastName, bureau, jobTitle, email, cellPhone, role }
+ * Or bulk: { bulk: true, invites: [ ...same fields ] } (max 75)
  * Sends email verification; Twilio starts after they verify email.
  */
 export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
@@ -68,21 +69,117 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'PEERPOINT_KV is required for staff accounts.' }, 503, origin);
   }
 
-  let body: {
-    firstName?: string;
-    lastName?: string;
-    bureau?: string;
-    jobTitle?: string;
-    email?: string;
-    cellPhone?: string;
-    role?: string;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as typeof body;
+    body = (await request.json()) as Record<string, unknown>;
   } catch {
     return json({ error: 'Invalid JSON.' }, 400, origin);
   }
 
+  if (body.bulk === true) {
+    const raw = Array.isArray(body.invites) ? body.invites : [];
+    if (raw.length === 0) return json({ error: 'No invites provided.' }, 400, origin);
+    if (raw.length > 75) return json({ error: 'Bulk invite is limited to 75 rows at a time.' }, 400, origin);
+
+    const users = await loadUsers(env);
+    const pending = await listPendingInvites(env);
+    const usedEmails = new Set(
+      [
+        ...users.map(u => normalizeEmail(u.email)),
+        ...users.map(u => normalizeEmail(u.workEmail ?? '')),
+        ...pending.map(p => normalizeEmail(p.email))
+      ].filter(Boolean)
+    );
+
+    const results: Array<{
+      line?: number;
+      email: string;
+      ok: boolean;
+      error?: string;
+      emailed?: boolean;
+      inviteUrl?: string;
+    }> = [];
+
+    for (const item of raw) {
+      const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      const line = typeof row.line === 'number' ? row.line : undefined;
+      const parsed = parseInviteFields(row);
+      if ('error' in parsed) {
+        results.push({ line, email: String(row.email ?? ''), ok: false, error: parsed.error });
+        continue;
+      }
+      if (usedEmails.has(parsed.email)) {
+        results.push({
+          line,
+          email: parsed.email,
+          ok: false,
+          error: 'An account or pending invite already uses that email.'
+        });
+        continue;
+      }
+      try {
+        const created = await createAndEmailInvite(env, parsed, auth.session.username);
+        usedEmails.add(parsed.email);
+        results.push({
+          line,
+          email: parsed.email,
+          ok: true,
+          emailed: created.emailed,
+          inviteUrl: created.inviteUrl
+        });
+      } catch (e) {
+        results.push({
+          line,
+          email: parsed.email,
+          ok: false,
+          error: e instanceof Error ? e.message : 'Invite failed.'
+        });
+      }
+    }
+
+    const invited = results.filter(r => r.ok).length;
+    const failed = results.length - invited;
+    return json({ ok: true, invited, failed, results }, 200, origin);
+  }
+
+  const parsed = parseInviteFields(body);
+  if ('error' in parsed) return json({ error: parsed.error }, 400, origin);
+
+  const users = await loadUsers(env);
+  if (users.some(u => normalizeEmail(u.email) === parsed.email || normalizeEmail(u.workEmail ?? '') === parsed.email)) {
+    return json({ error: 'An account with that email already exists.' }, 409, origin);
+  }
+  const pending = await listPendingInvites(env);
+  if (pending.some(p => p.email === parsed.email)) {
+    return json({ error: 'An invite is already pending for that email.' }, 409, origin);
+  }
+
+  const created = await createAndEmailInvite(env, parsed, auth.session.username);
+  return json(
+    {
+      ok: true,
+      inviteUrl: created.inviteUrl,
+      setupUrl: created.setupUrl,
+      emailed: created.emailed,
+      emailNote: created.emailNote,
+      invite: created.invite
+    },
+    201,
+    origin
+  );
+}
+
+type InviteFields = {
+  firstName: string;
+  lastName: string;
+  bureau: string;
+  jobTitle: string;
+  email: string;
+  cellPhone: string;
+  role: StaffRole;
+};
+
+function parseInviteFields(body: Record<string, unknown>): InviteFields | { error: string } {
   const firstName = String(body.firstName ?? '').trim();
   const lastName = String(body.lastName ?? '').trim();
   const bureau = String(body.bureau ?? '').trim();
@@ -91,72 +188,65 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   const cellPhone = String(body.cellPhone ?? '').trim();
   const role: StaffRole = body.role === 'admin' ? 'admin' : body.role === 'staff' ? 'staff' : ('' as StaffRole);
 
-  if (!firstName) return json({ error: 'First name is required.' }, 400, origin);
-  if (!lastName) return json({ error: 'Last name is required.' }, 400, origin);
-  if (!bureau) return json({ error: 'Bureau is required.' }, 400, origin);
-  if (!jobTitle) return json({ error: 'Job title is required.' }, 400, origin);
+  if (!firstName) return { error: 'First name is required.' };
+  if (!lastName) return { error: 'Last name is required.' };
+  if (!bureau) return { error: 'Bureau is required.' };
+  if (!jobTitle) return { error: 'Job title is required.' };
   const emailErr = validateEmail(email);
-  if (emailErr) return json({ error: emailErr }, 400, origin);
-  if (!cellPhone) return json({ error: 'Cell phone is required (used for SMS verification after email).' }, 400, origin);
-  if (!toE164Phone(cellPhone)) {
-    return json({ error: 'Enter a valid US cell phone (10 digits or +1…).' }, 400, origin);
-  }
-  if (role !== 'admin' && role !== 'staff') {
-    return json({ error: 'Access must be Admin or Staff.' }, 400, origin);
-  }
+  if (emailErr) return { error: emailErr };
+  if (!cellPhone) return { error: 'Cell phone is required (used for SMS verification after email).' };
+  if (!toE164Phone(cellPhone)) return { error: 'Enter a valid US cell phone (10 digits or +1…).' };
+  if (role !== 'admin' && role !== 'staff') return { error: 'Access must be Admin or Staff.' };
+  return { firstName, lastName, bureau, jobTitle, email, cellPhone, role };
+}
 
-  const users = await loadUsers(env);
-  if (users.some(u => normalizeEmail(u.email) === email || normalizeEmail(u.workEmail ?? '') === email)) {
-    return json({ error: 'An account with that email already exists.' }, 409, origin);
-  }
-  const pending = await listPendingInvites(env);
-  if (pending.some(p => p.email === email)) {
-    return json({ error: 'An invite is already pending for that email.' }, 409, origin);
-  }
-
-  const invitedBy = auth.session.username;
+async function createAndEmailInvite(
+  env: Env,
+  fields: InviteFields,
+  invitedBy: string
+): Promise<{
+  inviteUrl: string;
+  setupUrl: string;
+  emailed: boolean;
+  emailNote?: string;
+  invite: Record<string, unknown>;
+}> {
   const { token, invite } = await createInvite(env, {
-    email,
-    role,
-    firstName,
-    lastName,
-    bureau,
-    jobTitle,
+    email: fields.email,
+    role: fields.role,
+    firstName: fields.firstName,
+    lastName: fields.lastName,
+    bureau: fields.bureau,
+    jobTitle: fields.jobTitle,
     invitedBy,
-    cellPhone
+    cellPhone: fields.cellPhone
   });
-  const verifyUrl = inviteVerifyEmailUrl(token, role);
+  const verifyUrl = inviteVerifyEmailUrl(token, fields.role);
   const mail = await sendInviteEmail(env, {
-    to: email,
+    to: fields.email,
     inviteUrl: verifyUrl,
-    firstName,
-    role
+    firstName: fields.firstName,
+    role: fields.role
   });
-
-  return json(
-    {
-      ok: true,
-      inviteUrl: verifyUrl,
-      setupUrl: inviteSetupUrl(token, role),
-      emailed: mail.emailed === true,
-      emailNote: mail.emailed ? undefined : 'reason' in mail ? mail.reason : undefined,
-      invite: {
-        token,
-        email: invite.email,
-        role: invite.role,
-        firstName: invite.firstName,
-        lastName: invite.lastName,
-        bureau: invite.bureau,
-        jobTitle: invite.jobTitle,
-        createdAt: invite.createdAt,
-        invitedBy: invite.invitedBy,
-        cellPhone: invite.cellPhone,
-        emailVerified: false
-      }
-    },
-    201,
-    origin
-  );
+  return {
+    inviteUrl: verifyUrl,
+    setupUrl: inviteSetupUrl(token, fields.role),
+    emailed: mail.emailed === true,
+    emailNote: mail.emailed ? undefined : 'reason' in mail ? mail.reason : undefined,
+    invite: {
+      token,
+      email: invite.email,
+      role: invite.role,
+      firstName: invite.firstName,
+      lastName: invite.lastName,
+      bureau: invite.bureau,
+      jobTitle: invite.jobTitle,
+      createdAt: invite.createdAt,
+      invitedBy: invite.invitedBy,
+      cellPhone: invite.cellPhone,
+      emailVerified: false
+    }
+  };
 }
 
 /**

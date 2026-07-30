@@ -2,11 +2,13 @@ import * as React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { InstallAppButton } from '../components/InstallAppButton';
 import { setUiMode } from '../lib/uiMode';
+import { ModernBackButton } from './ModernBackButton';
 
 export function ModernMore(): React.ReactElement {
   const navigate = useNavigate();
   return (
     <section className="modern-page modern-more">
+      <ModernBackButton to="/" label="Home" />
       <p className="modern-eyebrow">SETTINGS</p>
       <h1>More</h1>
       <div className="modern-settings">

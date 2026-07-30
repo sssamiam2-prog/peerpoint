@@ -5,6 +5,7 @@ import { AdminContentPanel } from '../components/AdminContentPanel';
 import { AdminTestPanel } from '../components/AdminTestPanel';
 import { TwilioPhoneVerify } from '../components/TwilioPhoneVerify';
 import { ADMIN_HOST, isAdminHostClient, isProductionAdminHost } from '../lib/adminHost';
+import { parseStaffImportFile, staffImportTemplateCsv } from '../lib/staffImport';
 
 const STAFF_TOKEN_KEY = 'peerpoint_staff_token';
 const STAFF_META_KEY = 'peerpoint_staff_meta';
@@ -257,6 +258,22 @@ export function StaffPage(): React.ReactElement {
   const [inviteEmail, setInviteEmail] = React.useState('');
   const [inviteCellPhone, setInviteCellPhone] = React.useState('');
   const [inviteRole, setInviteRole] = React.useState<StaffRole>('staff');
+  const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [bulkPreview, setBulkPreview] = React.useState<
+    Array<{
+      firstName: string;
+      lastName: string;
+      bureau: string;
+      jobTitle: string;
+      email: string;
+      cellPhone: string;
+      role: 'staff' | 'admin';
+      line: number;
+    }>
+  >([]);
+  const [bulkParseErrors, setBulkParseErrors] = React.useState<string[]>([]);
+  const [bulkResultSummary, setBulkResultSummary] = React.useState<string | undefined>(undefined);
+  const bulkFileRef = React.useRef<HTMLInputElement | null>(null);
   const [lastInviteUrl, setLastInviteUrl] = React.useState<string | undefined>();
   const [activeTab, setActiveTab] = React.useState<WorkspaceTab>('requests');
 
@@ -525,6 +542,87 @@ export function StaffPage(): React.ReactElement {
         message: note
       };
     }, toast => toast ?? undefined);
+  };
+
+  const onBulkFileSelected = async (file: File | null): Promise<void> => {
+    setBulkResultSummary(undefined);
+    setBulkParseErrors([]);
+    setBulkPreview([]);
+    if (!file) return;
+    const parsed = await parseStaffImportFile(file);
+    setBulkParseErrors(parsed.errors);
+    setBulkPreview(parsed.rows);
+    if (!parsed.rows.length && !parsed.errors.length) {
+      setBulkParseErrors(['No rows found in that file.']);
+    }
+  };
+
+  const onBulkInvite = async (): Promise<void> => {
+    if (!bulkPreview.length) return;
+    setError(undefined);
+    setBulkResultSummary(undefined);
+    setBulkBusy(true);
+    await runAction('Sending bulk invites…', async (): Promise<SuccessToast | null> => {
+      try {
+        const res = await fetch('/api/staff/accounts', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            bulk: true,
+            invites: bulkPreview.map(r => ({
+              line: r.line,
+              firstName: r.firstName,
+              lastName: r.lastName,
+              bureau: r.bureau,
+              jobTitle: r.jobTitle,
+              email: r.email,
+              cellPhone: r.cellPhone,
+              role: r.role
+            }))
+          })
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          invited?: number;
+          failed?: number;
+          results?: Array<{ line?: number; email: string; ok: boolean; error?: string }>;
+        };
+        if (!res.ok) {
+          setError(data.error ?? 'Bulk invite failed.');
+          return null;
+        }
+        const failDetails = (data.results ?? [])
+          .filter(r => !r.ok)
+          .slice(0, 8)
+          .map(r => `Row ${r.line ?? '?'}: ${r.error ?? 'failed'}`)
+          .join(' · ');
+        const summary = `Invited ${data.invited ?? 0}. Failed ${data.failed ?? 0}.${failDetails ? ` ${failDetails}` : ''}`;
+        setBulkResultSummary(summary);
+        setInfo(summary);
+        await refreshAccounts();
+        setBulkPreview([]);
+        if (bulkFileRef.current) bulkFileRef.current.value = '';
+        return {
+          title: 'Bulk invites finished',
+          message: `Sent ${data.invited ?? 0} invite(s). ${data.failed ?? 0} failed.`
+        };
+      } catch {
+        setError('Network error during bulk invite.');
+        return null;
+      } finally {
+        setBulkBusy(false);
+      }
+    }, toast => toast ?? undefined);
+  };
+
+  const downloadStaffTemplate = (): void => {
+    const blob = new Blob([staffImportTemplateCsv()], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'peerpoint-staff-invite-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const onResendInvite = async (invite: PendingInvite): Promise<void> => {
@@ -2101,6 +2199,94 @@ export function StaffPage(): React.ReactElement {
             </fieldset>
             <button type="submit">Send verification email</button>
           </form>
+
+          <div
+            className="staff-bulk-import"
+            style={{
+              marginTop: 28,
+              padding: 14,
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              background: 'var(--social-bg)',
+              maxWidth: 640
+            }}
+          >
+            <h4 style={{ margin: '0 0 6px' }}>Bulk invite from Excel / CSV</h4>
+            <p style={{ margin: '0 0 10px', fontSize: 14, color: 'var(--text)' }}>
+              Upload a spreadsheet with columns: <strong>firstName, lastName, bureau, jobTitle, email, cellPhone</strong>
+              , optional <strong>role</strong> (staff or admin). Max 75 rows per upload.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <button type="button" className="btn-ghost" onClick={downloadStaffTemplate}>
+                Download CSV template
+              </button>
+              <label className="btn-ghost" style={{ cursor: 'pointer', margin: 0 }}>
+                Choose .csv or .xlsx
+                <input
+                  ref={bulkFileRef}
+                  type="file"
+                  accept=".csv,.txt,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  style={{ display: 'none' }}
+                  onChange={e => void onBulkFileSelected(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!bulkPreview.length || bulkBusy}
+                onClick={() => void onBulkInvite()}
+              >
+                {bulkBusy ? 'Sending…' : `Send ${bulkPreview.length || ''} invite${bulkPreview.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+            {bulkParseErrors.length ? (
+              <ul style={{ margin: '10px 0 0', paddingLeft: 18, color: '#a4262c', fontSize: 13 }}>
+                {bulkParseErrors.map(err => (
+                  <li key={err}>{err}</li>
+                ))}
+              </ul>
+            ) : null}
+            {bulkPreview.length ? (
+              <div style={{ marginTop: 12, overflowX: 'auto' }}>
+                <p style={{ margin: '0 0 6px', fontSize: 13 }}>
+                  Preview ({bulkPreview.length} ready):
+                </p>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th align="left">Row</th>
+                      <th align="left">Name</th>
+                      <th align="left">Email</th>
+                      <th align="left">Phone</th>
+                      <th align="left">Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkPreview.slice(0, 20).map(r => (
+                      <tr key={`${r.line}-${r.email}`}>
+                        <td>{r.line}</td>
+                        <td>
+                          {r.firstName} {r.lastName}
+                        </td>
+                        <td>{r.email}</td>
+                        <td>{r.cellPhone}</td>
+                        <td>{r.role}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {bulkPreview.length > 20 ? (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Showing first 20 of {bulkPreview.length}.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {bulkResultSummary ? (
+              <p style={{ marginTop: 10, fontSize: 13 }} role="status">
+                {bulkResultSummary}
+              </p>
+            ) : null}
+          </div>
 
           {lastInviteUrl ? (
             <div style={{ marginTop: 12, maxWidth: 560 }}>

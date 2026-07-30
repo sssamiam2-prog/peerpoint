@@ -1,3 +1,31 @@
+import { ModernBackButton } from './ModernBackButton';
+
 export function ModernResources(): React.ReactElement {
-  return <section className="modern-page modern-resources"><p className="modern-eyebrow">TAKE CARE</p><h1>Resources</h1><article id="crisis" className="modern-crisis-resource"><h2>In crisis or immediate danger?</h2><p>Call 911 for emergency help. Call or text <a href="tel:988">988</a> for the Suicide &amp; Crisis Lifeline.</p></article><div className="modern-resource-list"><a href="https://www.samhsa.gov/find-help/national-helpline" target="_blank" rel="noreferrer"><b>SAMHSA National Helpline</b><span>Free, confidential treatment referral and information.</span></a><a href="https://www.211.org/" target="_blank" rel="noreferrer"><b>211 Community Resources</b><span>Find local support, housing, food, and more.</span></a><a href="https://www.veteranscrisisline.net/" target="_blank" rel="noreferrer"><b>Veterans Crisis Line</b><span>Support for veterans and those who care about them.</span></a></div></section>;
+  return (
+    <section className="modern-page modern-resources">
+      <ModernBackButton to="/" label="Home" />
+      <p className="modern-eyebrow">TAKE CARE</p>
+      <h1>Resources</h1>
+      <article id="crisis" className="modern-crisis-resource">
+        <h2>In crisis or immediate danger?</h2>
+        <p>
+          Call 911 for emergency help. Call or text <a href="tel:988">988</a> for the Suicide &amp; Crisis Lifeline.
+        </p>
+      </article>
+      <div className="modern-resource-list">
+        <a href="https://www.samhsa.gov/find-help/national-helpline" target="_blank" rel="noreferrer">
+          <b>SAMHSA National Helpline</b>
+          <span>Free, confidential treatment referral and information.</span>
+        </a>
+        <a href="https://www.211.org/" target="_blank" rel="noreferrer">
+          <b>211 Community Resources</b>
+          <span>Find local support, housing, food, and more.</span>
+        </a>
+        <a href="https://www.veteranscrisisline.net/" target="_blank" rel="noreferrer">
+          <b>Veterans Crisis Line</b>
+          <span>Support for veterans and those who care about them.</span>
+        </a>
+      </div>
+    </section>
+  );
 }
