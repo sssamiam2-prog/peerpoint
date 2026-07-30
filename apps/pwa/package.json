@@ -1,7 +1,7 @@
 {
   "name": "@slco-peer-support/pwa",
   "private": true,
-  "version": "1.2.32",
+  "version": "1.2.34",
   "type": "module",
   "scripts": {
     "dev": "vite",

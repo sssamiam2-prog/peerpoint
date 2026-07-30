@@ -4,6 +4,7 @@ import { ActionFeedbackProvider } from './components/ActionFeedback';
 import { CrisisStrip } from './components/CrisisStrip';
 import { InstallAppButton } from './components/InstallAppButton';
 import { MemberAccessGate } from './components/MemberAccessGate';
+import { UiModeToggle } from './components/UiModeToggle';
 import { isProductionAdminHost } from './lib/adminHost';
 import { ChatPage } from './pages/ChatPage';
 import { JoinPage } from './pages/JoinPage';
@@ -178,7 +179,13 @@ function Layout(props: { children: React.ReactNode }): React.ReactElement {
           {/* Desktop only: install stays in header; mobile uses More page */}
           {memberChrome ? (
             <div className="app-header__install-desktop">
+              <UiModeToggle variant="header" />
               <InstallAppButton variant="header" />
+            </div>
+          ) : null}
+          {memberChrome ? (
+            <div className="app-header__modern-mobile">
+              <UiModeToggle variant="header" />
             </div>
           ) : null}
         </div>

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
+import { UiModeToggle } from './UiModeToggle';
 
 type Props = {
   onImmediate: () => void;
@@ -153,6 +154,8 @@ export function HomeHub(props: Props): React.ReactElement {
           <span className="home-cta__label">Leave a follow-up request</span>
         </button>
       </div>
+
+      <UiModeToggle variant="card" />
     </div>
   );
 }

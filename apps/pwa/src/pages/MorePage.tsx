@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { InstallAppButton } from '../components/InstallAppButton';
+import { UiModeToggle } from '../components/UiModeToggle';
 import { isStandaloneDisplay } from '../lib/pwaInstall';
 import { setUiMode } from '../lib/uiMode';
 
@@ -17,6 +18,8 @@ export function MorePage(): React.ReactElement {
           ? 'Room codes, Staff & Admin sign-in, and app settings.'
           : 'Room codes, Staff & Admin tools, and install PEERPoint on this device.'}
       </p>
+
+      <UiModeToggle variant="card" />
 
       <nav className="more-page__list" aria-label="More options">
         <Link to="/chat" className="more-page__link">
@@ -37,16 +40,16 @@ export function MorePage(): React.ReactElement {
 
       <section className="more-page__install" aria-labelledby="ui-mode-heading">
         <h3 id="ui-mode-heading">Interface</h3>
-        <p className="more-page__install-note">Try the new PEERPoint experience with session-based peer support.</p>
+        <p className="more-page__install-note">Or use the switch above.</p>
         <button
           type="button"
-          className="btn-ghost"
+          className="ui-mode-pulse-btn ui-mode-pulse-btn--card"
           onClick={() => {
             setUiMode('modern');
             navigate('/');
           }}
         >
-          Use Modern UI
+          Try Modern UI
         </button>
       </section>
 
