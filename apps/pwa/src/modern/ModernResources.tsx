@@ -4,7 +4,7 @@ export function ModernResources(): React.ReactElement {
   return (
     <section className="modern-page modern-resources">
       <ModernBackButton to="/" label="Home" />
-      <p className="modern-eyebrow">TAKE CARE</p>
+      <p className="modern-eyebrow">PEERPOINT</p>
       <h1>Resources</h1>
       <article id="crisis" className="modern-crisis-resource">
         <h2>In crisis or immediate danger?</h2>

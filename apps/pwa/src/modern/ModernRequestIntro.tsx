@@ -46,7 +46,7 @@ export function ModernRequestIntro(): React.ReactElement {
   return (
     <section className="modern-page modern-intro">
       <ModernBackButton to="/" label="Back" />
-      <p className="modern-eyebrow">PEER SUPPORT</p>
+      <p className="modern-eyebrow">PEERPOINT</p>
       <h1>Asking for support is a strength.</h1>
       <div className="modern-feature-list">
         <div>

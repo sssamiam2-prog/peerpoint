@@ -61,9 +61,9 @@ export function ModernWaiting(): React.ReactElement {
         <span />
         <span />
       </div>
-      <p className="modern-eyebrow">REQUEST SENT</p>
+      <p className="modern-eyebrow">PEERPOINT · REQUEST SENT</p>
       <h1>We’re finding someone for you.</h1>
-      <p>A trained peer support staff member will join as soon as they can.</p>
+      <p>A trained PEERPoint staff member will join as soon as they can.</p>
       <div className="modern-code">
         <span>Your support code</span>
         <strong>{session.publicSupportCode}</strong>

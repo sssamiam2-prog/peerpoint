@@ -9,7 +9,7 @@ export function ModernMore(): React.ReactElement {
   return (
     <section className="modern-page modern-more">
       <ModernBackButton to="/" label="Home" />
-      <p className="modern-eyebrow">SETTINGS</p>
+      <p className="modern-eyebrow">PEERPOINT</p>
       <h1>More</h1>
       <div className="modern-settings">
         <div>

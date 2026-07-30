@@ -1,13 +1,18 @@
 import { Link } from 'react-router-dom';
+import { ModernBrandMark } from './ModernBrandMark';
 
 export function ModernHome(): React.ReactElement {
   return (
     <section className="modern-home">
-      <img src="/peerpoint-logo.png" alt="PEERPoint" className="modern-logo" />
+      <ModernBrandMark size="hero" />
       <div className="modern-hero">
-        <p className="modern-eyebrow">CONFIDENTIAL PEER SUPPORT</p>
-        <h1>You’re not alone.</h1>
-        <p>Connect with trained peer support staff when you need someone who understands.</p>
+        <p className="modern-eyebrow">PEERPOINT · CONFIDENTIAL</p>
+        <h1 className="modern-brand-title">
+          <span className="modern-brand-title__peer">PEER</span>
+          <span className="modern-brand-title__point">POINT</span>
+        </h1>
+        <p className="modern-hero-tagline">Stronger together — always here.</p>
+        <p>You’re not alone. Connect with trained peer support staff when you need someone who understands.</p>
         <Link className="modern-primary" to="/m/request">
           Request Peer Support <span>→</span>
         </Link>

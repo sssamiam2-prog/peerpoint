@@ -46,5 +46,79 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
   const endCall = async (): Promise<void> => { leaveLiveKitAudio(); setCall('ended'); await connection?.publishCall({ state: 'ended' }); };
   const endSession = async (): Promise<void> => { if (!id) return; await fetch('/api/peer-support/session/close', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(staffToken ? { Authorization: `Bearer ${staffToken}` } : {}) }, body: JSON.stringify({ requestId: id, token }) }).catch(() => undefined); clearModernSession(); setDestroying(true); };
   if (!id) return <div />;
-  return <section className="modern-chat"><ModernBackButton to={staff ? '/m/staff' : '/'} label={staff ? 'Requests' : 'Home'} /><header><div><span className="modern-status-dot" /> <b>{staff ? `Support code: ${supportCode ?? 'Session'}` : 'Peer Support Staff'}</b><small>{typing ? 'Typing…' : 'Confidential chat'}</small></div><button className="modern-voice-button" onClick={() => void requestCall()}>⌁ Voice</button></header><div className="modern-chat-tabs"><button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>Chat</button><button className={tab === 'details' ? 'active' : ''} onClick={() => setTab('details')}>Details</button></div>{tab === 'details' ? <div className="modern-details"><p>This conversation is confidential and can be ended at any time.</p><button onClick={() => void endSession()} className="modern-end-session">End session</button></div> : <><div className="modern-messages">{messages.map((m) => <div key={m.id} className={`modern-message ${m.from === (staff ? 'Peer Support Staff' : 'You') ? 'mine' : ''}`}><b>{m.from === 'You' ? 'You' : 'Peer Support Staff'}</b>{m.text}</div>)}{error ? <p className="modern-error">{error}</p> : null}</div><form className="modern-composer" onSubmit={(e) => { e.preventDefault(); void send(); }}><input value={draft} onChange={(e) => { setDraft(e.target.value); void connection?.publishTyping(true); }} placeholder="Type a message…" /><button disabled={!connection}>Send</button></form></>}<ModernCallOverlay state={call} onAccept={() => void acceptCall()} onDecline={() => { setCall(reduceCallState(call, 'declined')); void connection?.publishCall({ state: 'declined' }); }} onEnd={() => void endCall()} />{destroying ? <ConversationDestroyOverlay onComplete={() => navigate(staff ? '/m/staff' : '/')} /> : null}</section>;
+  return (
+    <section className="modern-chat">
+      <ModernBackButton to={staff ? '/m/staff' : '/'} label={staff ? 'Requests' : 'Home'} />
+      <header>
+        <div>
+          <span className="modern-status-dot" />{' '}
+          <b>{staff ? `Support code: ${supportCode ?? 'Session'}` : 'PEERPoint Staff'}</b>
+          <small>{typing ? 'Typing…' : 'Confidential PEERPoint chat'}</small>
+        </div>
+        <button className="modern-voice-button" onClick={() => void requestCall()}>
+          ⌁ Voice
+        </button>
+      </header>
+      <div className="modern-chat-tabs">
+        <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>
+          Chat
+        </button>
+        <button className={tab === 'details' ? 'active' : ''} onClick={() => setTab('details')}>
+          Details
+        </button>
+      </div>
+      {tab === 'details' ? (
+        <div className="modern-details">
+          <p>This PEERPoint conversation is confidential and can be ended at any time.</p>
+          <button onClick={() => void endSession()} className="modern-end-session">
+            End session
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="modern-messages">
+            {messages.map((m) => (
+              <div
+                key={m.id}
+                className={`modern-message ${m.from === (staff ? 'Peer Support Staff' : 'You') ? 'mine' : ''}`}
+              >
+                <b>{m.from === 'You' ? 'You' : 'PEERPoint Staff'}</b>
+                {m.text}
+              </div>
+            ))}
+            {error ? <p className="modern-error">{error}</p> : null}
+          </div>
+          <form
+            className="modern-composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send();
+            }}
+          >
+            <input
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                void connection?.publishTyping(true);
+              }}
+              placeholder="Type a message…"
+            />
+            <button disabled={!connection}>Send</button>
+          </form>
+        </>
+      )}
+      <ModernCallOverlay
+        state={call}
+        onAccept={() => void acceptCall()}
+        onDecline={() => {
+          setCall(reduceCallState(call, 'declined'));
+          void connection?.publishCall({ state: 'declined' });
+        }}
+        onEnd={() => void endCall()}
+      />
+      {destroying ? (
+        <ConversationDestroyOverlay onComplete={() => navigate(staff ? '/m/staff' : '/')} />
+      ) : null}
+    </section>
+  );
 }

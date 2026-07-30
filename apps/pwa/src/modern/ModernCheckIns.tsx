@@ -21,7 +21,7 @@ export function ModernCheckIns(): React.ReactElement {
   return (
     <section className="modern-page modern-checkin">
       <ModernBackButton to="/" label="Home" />
-      <p className="modern-eyebrow">DAILY CHECK-IN</p>
+      <p className="modern-eyebrow">PEERPOINT · CHECK-IN</p>
       <h1>How are you feeling?</h1>
       <p>Take a moment to check in with yourself. This stays on your device.</p>
       <div className="modern-moods">

@@ -71,7 +71,7 @@ export function ModernStaffRequests(): React.ReactElement {
     <section className="modern-page modern-staff">
       <ModernBackButton to="/m/more" label="More" />
       <header>
-        <p className="modern-eyebrow">STAFF WORKSPACE</p>
+        <p className="modern-eyebrow">PEERPOINT · STAFF</p>
         <h1>Support requests</h1>
       </header>
       <div className="modern-segmented">
