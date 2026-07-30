@@ -1,9 +1,14 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ConversationDestroyOverlay } from '../components/ConversationDestroyOverlay';
+import { PeerConfidentialityModal } from '../components/PeerConfidentialityModal';
 import { VoiceCheckModal, loadVoiceDisguisePref } from '../components/VoiceCheckModal';
 import { hasAblyAuthConfigured } from '../lib/ablyAuth';
 import { explainAblyError, normalizeRoomCodeInput, sanitizeAblyApiKey } from '../lib/peerChatAbly';
+import {
+  confidentialitySessionKey,
+  hasAcknowledgedConfidentiality
+} from '../lib/peerConfidentiality';
 import {
   startPeerVoiceSession,
   type PeerVoiceSessionApi,
@@ -59,6 +64,11 @@ export function PeerVoicePage(): React.ReactElement {
   const [muted, setMuted] = React.useState(false);
   const [retryNonce, setRetryNonce] = React.useState(0);
   const [destroying, setDestroying] = React.useState(false);
+  const [pendingJoin, setPendingJoin] = React.useState<{
+    room: string;
+    name: string;
+    disguise: VoiceDisguisePreset;
+  } | null>(null);
   const sessionRef = React.useRef<PeerVoiceSessionApi | null>(null);
   const remoteAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const voiceEpochRef = React.useRef(0);
@@ -139,6 +149,22 @@ export function PeerVoicePage(): React.ReactElement {
     sessionRef.current?.setMuted(muted);
   }, [muted]);
 
+  const beginVoiceSession = React.useCallback(
+    (room: string, name: string, nextDisguise: VoiceDisguisePreset): void => {
+      try {
+        sessionStorage.setItem(DISPLAY_KEY, name);
+        sessionStorage.setItem(DISGUISE_KEY, nextDisguise);
+      } catch {
+        /* ignore */
+      }
+      voiceEpochRef.current++;
+      setUiState('connecting');
+      setStatusLine('Requesting microphone…');
+      setSession({ room, name, disguise: nextDisguise });
+    },
+    []
+  );
+
   const onJoin = (): void => {
     setJoinError(undefined);
     const parsed = normalizeRoomCodeInput(roomInput);
@@ -155,21 +181,17 @@ export function PeerVoicePage(): React.ReactElement {
       setJoinError('Display name must be 40 characters or fewer.');
       return;
     }
-    try {
-      sessionStorage.setItem(DISPLAY_KEY, name);
-      sessionStorage.setItem(DISGUISE_KEY, disguise);
-    } catch {
-      /* ignore */
+    const sessionKey = confidentialitySessionKey('room', parsed.code);
+    if (!hasAcknowledgedConfidentiality(sessionKey)) {
+      setPendingJoin({ room: parsed.code, name, disguise });
+      return;
     }
-    voiceEpochRef.current++;
-    setUiState('connecting');
-    setStatusLine('Requesting microphone…');
-    setSession({ room: parsed.code, name, disguise });
+    beginVoiceSession(parsed.code, name, disguise);
   };
 
   const autoJoinedRef = React.useRef(false);
   React.useEffect(() => {
-    if (autoJoinedRef.current || session || !hasKey) return;
+    if (autoJoinedRef.current || session || pendingJoin || !hasKey) return;
     const fromLink = (params.get('room') ?? '').trim();
     if (!fromLink) return;
     const parsed = normalizeRoomCodeInput(fromLink);
@@ -183,17 +205,13 @@ export function PeerVoicePage(): React.ReactElement {
     if (name.length < 1 || name.length > 40) return;
     autoJoinedRef.current = true;
     setRoomInput(parsed.code);
-    try {
-      sessionStorage.setItem(DISPLAY_KEY, name);
-      sessionStorage.setItem(DISGUISE_KEY, disguise);
-    } catch {
-      /* ignore */
+    const sessionKey = confidentialitySessionKey('room', parsed.code);
+    if (!hasAcknowledgedConfidentiality(sessionKey)) {
+      setPendingJoin({ room: parsed.code, name, disguise });
+      return;
     }
-    voiceEpochRef.current++;
-    setUiState('connecting');
-    setStatusLine('Requesting microphone…');
-    setSession({ room: parsed.code, name, disguise });
-  }, [disguise, hasKey, nameInput, params, session]);
+    beginVoiceSession(parsed.code, name, disguise);
+  }, [beginVoiceSession, disguise, hasKey, nameInput, params, pendingJoin, session]);
 
   const finishLeave = React.useCallback((): void => {
     sessionRef.current?.close();
@@ -244,8 +262,22 @@ export function PeerVoicePage(): React.ReactElement {
 
   if (!session) {
     const fromEmailLink = Boolean((params.get('room') ?? '').trim());
+    const pendingKey = pendingJoin
+      ? confidentialitySessionKey('room', pendingJoin.room)
+      : '';
     return (
       <div className="page-shell page-shell-wide peer-voice-join">
+        <PeerConfidentialityModal
+          open={Boolean(pendingJoin)}
+          sessionKey={pendingKey}
+          onContinue={() => {
+            if (!pendingJoin) return;
+            const next = pendingJoin;
+            setPendingJoin(null);
+            beginVoiceSession(next.room, next.name, next.disguise);
+          }}
+          onCancel={() => setPendingJoin(null)}
+        />
         <h2>Peer voice</h2>
 
         <button

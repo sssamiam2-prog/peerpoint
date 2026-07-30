@@ -1,5 +1,10 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PeerConfidentialityModal } from '../components/PeerConfidentialityModal';
+import {
+  confidentialitySessionKey,
+  hasAcknowledgedConfidentiality
+} from '../lib/peerConfidentiality';
 import { clearModernSession, loadModernSession } from '../lib/modernSession';
 import { ModernBackButton } from './ModernBackButton';
 
@@ -9,6 +14,8 @@ export function ModernWaiting(): React.ReactElement {
   const navigate = useNavigate();
   const session = React.useMemo(loadModernSession, []);
   const [error, setError] = React.useState('');
+  const [showNotice, setShowNotice] = React.useState(false);
+  const sessionKey = session ? confidentialitySessionKey('request', session.requestId) : '';
 
   React.useEffect(() => {
     if (!session) {
@@ -22,8 +29,13 @@ export function ModernWaiting(): React.ReactElement {
           `/api/peer-support/session?requestId=${encodeURIComponent(session.requestId)}&token=${encodeURIComponent(session.anonymousSessionToken)}`
         );
         const data = (await r.json()) as SessionStatus;
-        if (!cancelled && (data.staffJoined || data.active || data.status === 'active')) {
-          navigate('/m/chat', { replace: true });
+        if (cancelled) return;
+        if (data.staffJoined || data.active || data.status === 'active') {
+          if (hasAcknowledgedConfidentiality(sessionKey)) {
+            navigate('/m/chat', { replace: true });
+          } else {
+            setShowNotice(true);
+          }
         }
       } catch {
         if (!cancelled) setError('Connection check failed. We will keep trying.');
@@ -35,7 +47,7 @@ export function ModernWaiting(): React.ReactElement {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [navigate, session]);
+  }, [navigate, session, sessionKey]);
 
   const cancel = async (): Promise<void> => {
     if (!session) return;
@@ -55,6 +67,16 @@ export function ModernWaiting(): React.ReactElement {
 
   return (
     <section className="modern-page modern-waiting">
+      <PeerConfidentialityModal
+        open={showNotice}
+        sessionKey={sessionKey}
+        variant="modern"
+        onContinue={() => {
+          setShowNotice(false);
+          navigate('/m/chat', { replace: true });
+        }}
+        onCancel={() => setShowNotice(false)}
+      />
       <ModernBackButton to="/" label="Home" />
       <div className="waiting-rings">
         <span />
@@ -76,6 +98,9 @@ export function ModernWaiting(): React.ReactElement {
         </button>
       </div>
       {error ? <p className="modern-error">{error}</p> : null}
+      {showNotice ? (
+        <p className="modern-muted">A peer is ready — review confidentiality to continue.</p>
+      ) : null}
       <button type="button" className="modern-danger-link" onClick={() => void cancel()}>
         Cancel request
       </button>

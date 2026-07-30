@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ConversationDestroyOverlay } from '../components/ConversationDestroyOverlay';
+import { PeerConfidentialityModal } from '../components/PeerConfidentialityModal';
 import { hasAblyAuthConfigured } from '../lib/ablyAuth';
 import {
   channelNameForRoom,
@@ -11,6 +12,10 @@ import {
   sanitizeAblyApiKey
 } from '../lib/peerChatAbly';
 import { isPeerChatDebugEnabled, peerChatLog, peerChatWarn } from '../lib/peerChatDebugLog';
+import {
+  confidentialitySessionKey,
+  hasAcknowledgedConfidentiality
+} from '../lib/peerConfidentiality';
 import type { PeerChatMessage, PeerPresenceMember } from '../types/chat';
 
 const DISPLAY_KEY = 'peerpoint_chat_display_name';
@@ -80,6 +85,7 @@ export function ChatPage(): React.ReactElement {
   const [channelName, setChannelName] = React.useState<string | null>(null);
   const [connectionId, setConnectionId] = React.useState<string | null>(null);
   const [destroying, setDestroying] = React.useState(false);
+  const [pendingJoin, setPendingJoin] = React.useState<{ room: string; name: string } | null>(null);
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const composerRef = React.useRef<HTMLTextAreaElement | null>(null);
   const seenIds = React.useRef<Set<string>>(new Set());
@@ -249,6 +255,24 @@ export function ChatPage(): React.ReactElement {
 
   const canSend = Boolean(draft.trim() && connState === 'connected' && publishReady);
 
+  const beginChatSession = React.useCallback((room: string, name: string): void => {
+    try {
+      sessionStorage.setItem(DISPLAY_KEY, name);
+    } catch {
+      /* ignore */
+    }
+    seenIds.current = new Set();
+    setMessages([]);
+    setTypingOthers([]);
+    setPresenceMembers([]);
+    setLocalClientId(null);
+    setPresenceEnabled(false);
+    setPublishReady(false);
+    setConnState('connecting');
+    peerChatLog('ui', 'join', { room, name });
+    setSession({ room, name });
+  }, []);
+
   const onJoin = (): void => {
     setJoinError(undefined);
     const parsed = normalizeRoomCodeInput(roomInput);
@@ -265,26 +289,17 @@ export function ChatPage(): React.ReactElement {
       setJoinError('Display name must be 40 characters or fewer.');
       return;
     }
-    try {
-      sessionStorage.setItem(DISPLAY_KEY, name);
-    } catch {
-      /* ignore */
+    const sessionKey = confidentialitySessionKey('room', parsed.code);
+    if (!hasAcknowledgedConfidentiality(sessionKey)) {
+      setPendingJoin({ room: parsed.code, name });
+      return;
     }
-    seenIds.current = new Set();
-    setMessages([]);
-    setTypingOthers([]);
-    setPresenceMembers([]);
-    setLocalClientId(null);
-    setPresenceEnabled(false);
-    setPublishReady(false);
-    setConnState('connecting');
-    peerChatLog('ui', 'join', { room: parsed.code, name });
-    setSession({ room: parsed.code, name });
+    beginChatSession(parsed.code, name);
   };
 
   const autoJoinedRef = React.useRef(false);
   React.useEffect(() => {
-    if (autoJoinedRef.current || session || !hasKey) return;
+    if (autoJoinedRef.current || session || pendingJoin || !hasKey) return;
     const fromLink = (params.get('room') ?? '').trim();
     if (!fromLink) return;
     const parsed = normalizeRoomCodeInput(fromLink);
@@ -299,22 +314,13 @@ export function ChatPage(): React.ReactElement {
     if (name.length < 1 || name.length > 40) return;
     autoJoinedRef.current = true;
     setRoomInput(parsed.code);
-    try {
-      sessionStorage.setItem(DISPLAY_KEY, name);
-    } catch {
-      /* ignore */
+    const sessionKey = confidentialitySessionKey('room', parsed.code);
+    if (!hasAcknowledgedConfidentiality(sessionKey)) {
+      setPendingJoin({ room: parsed.code, name });
+      return;
     }
-    seenIds.current = new Set();
-    setMessages([]);
-    setTypingOthers([]);
-    setPresenceMembers([]);
-    setLocalClientId(null);
-    setPresenceEnabled(false);
-    setPublishReady(false);
-    setConnState('connecting');
-    peerChatLog('ui', 'auto-join', { room: parsed.code, name, fromJoin });
-    setSession({ room: parsed.code, name });
-  }, [hasKey, params, nameInput, session]);
+    beginChatSession(parsed.code, name);
+  }, [beginChatSession, hasKey, nameInput, params, pendingJoin, session]);
 
   const finishLeave = React.useCallback((): void => {
     peerChatLog('ui', 'leave');
@@ -399,8 +405,22 @@ export function ChatPage(): React.ReactElement {
 
   if (!session) {
     const fromEmailLink = Boolean((params.get('room') ?? '').trim());
+    const pendingKey = pendingJoin
+      ? confidentialitySessionKey('room', pendingJoin.room)
+      : '';
     return (
       <div className="page-shell page-shell-tight">
+        <PeerConfidentialityModal
+          open={Boolean(pendingJoin)}
+          sessionKey={pendingKey}
+          onContinue={() => {
+            if (!pendingJoin) return;
+            const next = pendingJoin;
+            setPendingJoin(null);
+            beginChatSession(next.room, next.name);
+          }}
+          onCancel={() => setPendingJoin(null)}
+        />
         <h2>Peer chat</h2>
         {fromEmailLink ? (
           <p className="callout callout--muted">

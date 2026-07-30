@@ -1339,6 +1339,111 @@ a.expect-modal__primary {
   text-decoration: none !important;
 }
 
+.peer-confidentiality-modal {
+  width: min(520px, 100%);
+  max-height: min(90dvh, 720px);
+  overflow: auto;
+}
+
+.peer-confidentiality-modal p {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.peer-confidentiality-modal__exceptions-label {
+  margin: 12px 0 6px !important;
+}
+
+.peer-confidentiality-modal__exceptions {
+  margin: 0 0 12px;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.peer-confidentiality-modal__exceptions li + li {
+  margin-top: 6px;
+}
+
+.peer-confidentiality-modal__emergency {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(157, 80, 107, 0.1);
+  border: 1px solid rgba(157, 80, 107, 0.28);
+}
+
+.peer-confidentiality-modal__check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 4px 0 14px;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.peer-confidentiality-modal__check input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.peer-confidentiality-modal__actions {
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.peer-confidentiality-modal__actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.peer-confidentiality-modal__disclaimer {
+  margin: 0 !important;
+  font-size: 0.75rem !important;
+  line-height: 1.4 !important;
+  color: var(--text-muted, #6b7280) !important;
+}
+
+.peer-confidentiality-backdrop--modern {
+  background: rgba(7, 17, 31, 0.78);
+  z-index: 200;
+}
+
+.peer-confidentiality-modal--modern {
+  background: #122033;
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  color: #f4f7fb;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.peer-confidentiality-modal--modern h2 {
+  color: #f4f7fb;
+}
+
+.peer-confidentiality-modal--modern p,
+.peer-confidentiality-modal--modern .peer-confidentiality-modal__exceptions,
+.peer-confidentiality-modal--modern .expect-modal__note {
+  color: #c5d0e0;
+}
+
+.peer-confidentiality-modal--modern .peer-confidentiality-modal__check {
+  color: #f4f7fb;
+}
+
+.peer-confidentiality-modal--modern .peer-confidentiality-modal__disclaimer {
+  color: #8a9bb0 !important;
+}
+
+.peer-confidentiality-modal__continue {
+  width: auto !important;
+  margin-top: 0 !important;
+  padding: 10px 16px !important;
+}
+
 .crisis-modal {
   width: min(440px, 100%);
   padding: 22px 20px 18px;
