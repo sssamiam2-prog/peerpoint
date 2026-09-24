@@ -400,21 +400,44 @@ export function StaffPage(): React.ReactElement {
     setReport(data);
   }, [authHeaders, meta?.role, token]);
 
+  const sortMemberAccounts = React.useCallback((list: PublicAccount[]): PublicAccount[] => {
+    return [...list].sort((a, b) => {
+      const nameA = `${a.lastName} ${a.firstName} ${a.username}`.toLowerCase();
+      const nameB = `${b.lastName} ${b.firstName} ${b.username}`.toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  }, []);
+
+  const adminAccounts = React.useMemo(
+    () => sortMemberAccounts(accounts.filter(a => a.role === 'admin')),
+    [accounts, sortMemberAccounts]
+  );
+  const staffAccounts = React.useMemo(
+    () => sortMemberAccounts(accounts.filter(a => a.role === 'staff')),
+    [accounts, sortMemberAccounts]
+  );
+
+  const eventLoggerPhaseActive = isEventLoggerPhaseOnly();
+
   React.useEffect(() => {
     if (token) {
-      void refresh();
+      if (!eventLoggerPhaseActive) void refresh();
       if (meta?.role === 'admin') void refreshAccounts();
     }
-  }, [token, refresh, refreshAccounts, meta?.role]);
+  }, [token, refresh, refreshAccounts, meta?.role, eventLoggerPhaseActive]);
+
+  React.useEffect(() => {
+    if (token && meta?.role === 'admin' && activeTab === 'members') void refreshAccounts();
+  }, [token, meta?.role, activeTab, refreshAccounts]);
 
   // Poll while signed in so assignment offers surface quickly (email/SMS already fire server-side).
   React.useEffect(() => {
-    if (!token || meta?.mustChangePassword) return;
+    if (!token || meta?.mustChangePassword || eventLoggerPhaseActive) return;
     const id = window.setInterval(() => {
       void refresh();
     }, 5000);
     return (): void => window.clearInterval(id);
-  }, [token, meta?.mustChangePassword, refresh]);
+  }, [token, meta?.mustChangePassword, refresh, eventLoggerPhaseActive]);
 
   React.useEffect(() => {
     ensureSoftAudioGestureHook();
@@ -890,6 +913,44 @@ export function StaffPage(): React.ReactElement {
       }
       await refreshAccounts();
       return { title: 'Invite revoked' };
+    }, toast => toast ?? undefined);
+  };
+
+  const onPermanentRemoveMember = async (account: PublicAccount): Promise<void> => {
+    if (isMasterAdminUsername(account.username)) return;
+    const display = `${account.firstName} ${account.lastName}`.trim() || account.username;
+    const ok = window.confirm(
+      `Permanently remove ${display} (${account.username}) from PEERPoint?\n\nThis deletes their login and cannot be undone. They can be invited again later as a new account.`
+    );
+    if (!ok) return;
+    const typed = window.prompt(
+      `Type ${account.username} exactly to confirm permanent removal:`
+    );
+    if (typed?.trim().toLowerCase() !== account.username.trim().toLowerCase()) {
+      setError('Removal cancelled — username did not match.');
+      return;
+    }
+    setError(undefined);
+    await runAction('Removing member…', async (): Promise<SuccessToast | null> => {
+      const res = await fetch('/api/staff/accounts', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          username: account.username,
+          permanentDelete: true,
+          confirmUsername: typed.trim()
+        })
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not remove member.');
+        return null;
+      }
+      await refreshAccounts();
+      return {
+        title: 'Member removed',
+        message: data.message ?? `${display} was permanently removed.`
+      };
     }, toast => toast ?? undefined);
   };
 
@@ -2650,13 +2711,8 @@ export function StaffPage(): React.ReactElement {
             </>
           ) : null}
 
-          <h4 style={{ marginTop: 24 }}>Accounts</h4>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-            Designate <strong>Peer Support Leaders</strong> to receive email when on-call coverage is unavailable or a
-            peer declines a queued request. Use the verify buttons to resend email or Twilio cell verification.
-          </p>
-          <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'grid', gap: 8 }}>
-            {accounts.map(a => (
+          {(() => {
+            const accountRow = (a: PublicAccount): React.ReactElement => (
               <li
                 key={a.username}
                 style={{
@@ -2675,13 +2731,13 @@ export function StaffPage(): React.ReactElement {
                   <strong>
                     {a.firstName} {a.lastName}
                   </strong>{' '}
-                  ({a.username}) · {a.role === 'admin' ? 'Admin' : 'Staff'}
+                  ({a.username})
                   {' · '}
                   {a.active ? 'active' : 'disabled'}
                   {a.isPeerSupportLeader ? ' · Peer Support Leader' : ''}
                   {a.emailVerified ? ' · email verified' : ' · email not verified'}
                   {a.twilioPhoneVerified ? ' · SMS phone verified' : ' · SMS phone not verified'}
-                  {a.username === 'admin' ? (
+                  {isMasterAdminUsername(a.username) ? (
                     <> · master control (not used for peer matching)</>
                   ) : (
                     <>
@@ -2741,10 +2797,50 @@ export function StaffPage(): React.ReactElement {
                       {a.active ? 'Disable' : 'Enable'}
                     </button>
                   ) : null}
+                  {!isMasterAdminUsername(a.username) ? (
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ color: '#a4262c', borderColor: '#a4262c' }}
+                      onClick={() => void onPermanentRemoveMember(a)}
+                    >
+                      Remove permanently
+                    </button>
+                  ) : null}
                 </span>
               </li>
-            ))}
-          </ul>
+            );
+
+            return (
+              <>
+                <h4 style={{ marginTop: 24, marginBottom: 4 }}>Administrators</h4>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0 }}>
+                  Admin accounts manage members, event settings, and (when enabled) the full PEERPoint workspace.
+                </p>
+                {adminAccounts.length === 0 ? (
+                  <p style={{ fontSize: 14, color: 'var(--text)' }}>No admin accounts yet.</p>
+                ) : (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'grid', gap: 8 }}>
+                    {adminAccounts.map(accountRow)}
+                  </ul>
+                )}
+
+                <h4 style={{ marginTop: 28, marginBottom: 4 }}>Peer Support Staff</h4>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0 }}>
+                  Staff log peer support events and (when enabled) take requests. Designate{' '}
+                  <strong>Peer Support Leaders</strong> to receive email when on-call coverage is unavailable or a peer
+                  declines a queued request.
+                </p>
+                {staffAccounts.length === 0 ? (
+                  <p style={{ fontSize: 14, color: 'var(--text)' }}>No staff accounts yet — invite members above.</p>
+                ) : (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', display: 'grid', gap: 8 }}>
+                    {staffAccounts.map(accountRow)}
+                  </ul>
+                )}
+              </>
+            );
+          })()}
         </section>
       ) : null}
 

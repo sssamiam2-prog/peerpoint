@@ -495,9 +495,42 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
   if (idx < 0) return json({ error: 'Account not found.' }, 404, origin);
   const user = { ...users[idx]! };
 
+  if (body.permanentDelete === true) {
+    if (isSeedAdminUsername(user.username)) {
+      return json({ error: 'Built-in master admin accounts cannot be removed.' }, 400, origin);
+    }
+    const confirmUsername = normalizeUsername(String(body.confirmUsername ?? ''));
+    if (!confirmUsername || confirmUsername !== user.username) {
+      return json(
+        { error: 'Type the member’s exact username to confirm permanent removal.' },
+        400,
+        origin
+      );
+    }
+    const actor = normalizeUsername(auth.session.username);
+    if (
+      actor === user.username ||
+      (user.email && normalizeEmail(user.email) === normalizeEmail(auth.session.username))
+    ) {
+      return json({ error: 'You cannot remove your own account while signed in.' }, 400, origin);
+    }
+    users.splice(idx, 1);
+    await saveUsers(env, users);
+    return json(
+      {
+        ok: true,
+        removed: user.username,
+        displayName: displayNameFor(user),
+        message: 'Member permanently removed from PEERPoint.'
+      },
+      200,
+      origin
+    );
+  }
+
   if (body.resendEmailVerification === true) {
-    if (username === 'admin') {
-      return json({ error: 'Seed Admin does not need email verification.' }, 400, origin);
+    if (isSeedAdminUsername(user.username)) {
+      return json({ error: 'Master admin accounts do not need email verification.' }, 400, origin);
     }
     const created = await createAccountEmailVerify(env, user);
     if ('error' in created) return json({ error: created.error }, 400, origin);
@@ -524,8 +557,8 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
   }
 
   if (body.retriggerTwilioVerify === true) {
-    if (username === 'admin') {
-      return json({ error: 'Seed Admin does not use SMS matching.' }, 400, origin);
+    if (isSeedAdminUsername(user.username)) {
+      return json({ error: 'Master admin accounts do not use SMS matching.' }, 400, origin);
     }
     const cell = (user.cellPhone ?? '').trim();
     if (!cell) {
@@ -601,23 +634,23 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
   }
 
   if (typeof body.active === 'boolean') {
-    if (username === 'admin' && body.active === false) {
-      return json({ error: 'The seed Admin account cannot be disabled.' }, 400, origin);
+    if (isSeedAdminUsername(user.username) && body.active === false) {
+      return json({ error: 'Built-in master admin accounts cannot be disabled.' }, 400, origin);
     }
     user.active = body.active;
   }
 
   if (body.role === 'admin' || body.role === 'staff') {
-    if (username === 'admin' && body.role !== 'admin') {
-      return json({ error: 'The seed Admin account must remain Admin.' }, 400, origin);
+    if (isSeedAdminUsername(user.username) && body.role !== 'admin') {
+      return json({ error: 'Built-in master admin accounts must remain Admin.' }, 400, origin);
     }
     user.role = body.role;
   }
 
   if (body.sex === 'male' || body.sex === 'female') {
-    if (username === 'admin') {
+    if (isSeedAdminUsername(user.username)) {
       return json(
-        { error: 'The master Admin account is not used for peer matching and does not need Male/Female.' },
+        { error: 'Master admin accounts are not used for peer matching and do not need Male/Female.' },
         400,
         origin
       );
@@ -626,9 +659,9 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
   }
 
   if (typeof body.isPeerSupportLeader === 'boolean') {
-    if (username === 'admin') {
+    if (isSeedAdminUsername(user.username)) {
       return json(
-        { error: 'The master Admin account is control-only and is not designated as a Peer Support Leader.' },
+        { error: 'Master admin accounts are control-only and are not designated as Peer Support Leaders.' },
         400,
         origin
       );
