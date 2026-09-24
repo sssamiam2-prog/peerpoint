@@ -23,13 +23,26 @@ import {
   validateEmail,
   validatePassword,
   hashPassword,
-  type StaffRole
+  isSeedAdminUsername,
+  type StaffRole,
+  validateUsername
 } from '../../_lib/staffAuth';
 import { toE164Phone } from '../../_lib/sms';
 import { startTwilioVerifyAndEmail } from '../../_lib/twilioVerifyNotify';
 import { isOutgoingCallerIdVerified } from '../../_lib/twilioCallerId';
 
 type Ctx = { request: Request; env: Env };
+
+function suggestUsername(firstName: string, lastName: string, used: Set<string>): string {
+  const base = normalizeUsername(`${firstName}.${lastName}`.replace(/[^a-z0-9._-]+/gi, ''));
+  const root = (base || 'peer').slice(0, 24);
+  if (!used.has(root) && !validateUsername(root)) return root;
+  for (let i = 1; i < 1000; i++) {
+    const candidate = `${root}${i}`.slice(0, 32);
+    if (!used.has(candidate) && !validateUsername(candidate)) return candidate;
+  }
+  return `${root}${Date.now().toString(36)}`.slice(0, 32);
+}
 
 export async function onRequestOptions({ request }: Ctx): Promise<Response> {
   return new Response(null, { status: 204, headers: corsHeaders(request.headers.get('Origin')) });
@@ -118,7 +131,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
         continue;
       }
       try {
-        const created = await createAndEmailInvite(env, parsed, auth.session.username);
+        const created = await createAndEmailInvite(env, parsed, auth.session.username, body.sendEmail !== false);
         usedEmails.add(parsed.email);
         results.push({
           line,
@@ -142,6 +155,128 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ ok: true, invited, failed, results }, 200, origin);
   }
 
+  /** Admin-only: create a ready Staff account with no invite email (for testing / silent setup). */
+  if (body.provision === true) {
+    const firstName = String(body.firstName ?? '').trim();
+    const lastName = String(body.lastName ?? '').trim();
+    const bureau = String(body.bureau ?? '').trim() || 'Sheriff’s Office';
+    const jobTitle = String(body.jobTitle ?? '').trim() || 'Peer Support';
+    const email = normalizeEmail(body.email ?? '');
+    const cellPhone = String(body.cellPhone ?? '').trim() || '8015550100';
+    const role: StaffRole = body.role === 'admin' ? 'admin' : 'staff';
+    const sex = body.sex === 'female' ? 'female' : 'male';
+    const employmentClassification =
+      body.employmentClassification === 'civilian'
+        ? 'civilian'
+        : body.employmentClassification === 'sworn'
+          ? 'sworn'
+          : undefined;
+    const emailErr = validateEmail(email);
+    if (!firstName || !lastName) return json({ error: 'First and last name are required.' }, 400, origin);
+    if (emailErr) return json({ error: emailErr }, 400, origin);
+
+    const users = await loadUsers(env);
+    if (users.some(u => normalizeEmail(u.email) === email || normalizeEmail(u.workEmail ?? '') === email)) {
+      const existing = users.find(
+        u => normalizeEmail(u.email) === email || normalizeEmail(u.workEmail ?? '') === email
+      )!;
+      if (typeof body.isPeerSupportLeader === 'boolean') {
+        existing.isPeerSupportLeader = body.isPeerSupportLeader;
+      }
+      if (employmentClassification) existing.employmentClassification = employmentClassification;
+      existing.active = true;
+      existing.setupComplete = true;
+      existing.email = email;
+      existing.workEmail = email;
+      // Staff login identity is email.
+      if (existing.username !== email && !isSeedAdminUsername(existing.username)) {
+        const taken = users.some(u => u.username === email && u.username !== existing.username);
+        if (!taken) existing.username = email;
+      }
+      const tempPassword = String(body.temporaryPassword ?? '').trim();
+      if (tempPassword) {
+        const pwErr = validatePassword(tempPassword);
+        if (pwErr) return json({ error: pwErr }, 400, origin);
+        const { hash, salt } = await hashPassword(tempPassword);
+        existing.passwordHash = hash;
+        existing.salt = salt;
+        existing.mustChangePassword = true;
+      }
+      await saveUsers(env, users);
+      return json(
+        {
+          ok: true,
+          reused: true,
+          temporaryPassword: tempPassword || undefined,
+          account: toPublicAccount(existing)
+        },
+        200,
+        origin
+      );
+    }
+
+    const used = new Set(users.map(u => u.username));
+    // Default login username is the work email.
+    const username = email;
+    const userErr = validateUsername(username);
+    if (userErr) return json({ error: userErr }, 400, origin);
+    if (used.has(username)) return json({ error: 'Username already taken.' }, 409, origin);
+
+    const tempPassword =
+      String(body.temporaryPassword ?? '').trim() || `PeerTemp${Math.floor(100000 + Math.random() * 900000)}!`;
+    const pwErr = validatePassword(tempPassword);
+    if (pwErr) return json({ error: pwErr }, 400, origin);
+    const { hash, salt } = await hashPassword(tempPassword);
+    const nowIso = new Date().toISOString();
+    const created = {
+      username,
+      role,
+      firstName,
+      lastName,
+      bureau,
+      jobTitle,
+      email,
+      sex: sex as 'male' | 'female',
+      employmentClassification,
+      workEmail: email,
+      currentShift: String(body.currentShift ?? 'Days').trim() || 'Days',
+      cellPhone,
+      homePhone: cellPhone,
+      workPhone: String(body.workPhone ?? cellPhone).trim() || cellPhone,
+      passwordHash: hash,
+      salt,
+      active: true,
+      setupComplete: true,
+      emailVerifiedAt: nowIso,
+      createdAt: nowIso,
+      invitedBy: auth.session.username,
+      isPeerSupportLeader: body.isPeerSupportLeader === true,
+      peerAvailable: true,
+      mustChangePassword: true
+    };
+    users.push(created);
+    await saveUsers(env, users);
+
+    // Drop matching pending invite if any
+    const pending = await listPendingInvites(env);
+    for (const inv of pending) {
+      if (normalizeEmail(inv.email) === email) {
+        await deleteInvite(env, inv.token);
+      }
+    }
+
+    return json(
+      {
+        ok: true,
+        provisioned: true,
+        temporaryPassword: tempPassword,
+        account: toPublicAccount(created)
+      },
+      201,
+      origin
+    );
+  }
+
   const parsed = parseInviteFields(body);
   if ('error' in parsed) return json({ error: parsed.error }, 400, origin);
 
@@ -154,7 +289,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'An invite is already pending for that email.' }, 409, origin);
   }
 
-  const created = await createAndEmailInvite(env, parsed, auth.session.username);
+  const created = await createAndEmailInvite(env, parsed, auth.session.username, body.sendEmail !== false);
   return json(
     {
       ok: true,
@@ -203,7 +338,8 @@ function parseInviteFields(body: Record<string, unknown>): InviteFields | { erro
 async function createAndEmailInvite(
   env: Env,
   fields: InviteFields,
-  invitedBy: string
+  invitedBy: string,
+  sendEmail = true
 ): Promise<{
   inviteUrl: string;
   setupUrl: string;
@@ -222,17 +358,25 @@ async function createAndEmailInvite(
     cellPhone: fields.cellPhone
   });
   const verifyUrl = inviteVerifyEmailUrl(token, fields.role);
-  const mail = await sendInviteEmail(env, {
-    to: fields.email,
-    inviteUrl: verifyUrl,
-    firstName: fields.firstName,
-    role: fields.role
-  });
+  let emailed = false;
+  let emailNote: string | undefined;
+  if (sendEmail) {
+    const mail = await sendInviteEmail(env, {
+      to: fields.email,
+      inviteUrl: verifyUrl,
+      firstName: fields.firstName,
+      role: fields.role
+    });
+    emailed = mail.emailed === true;
+    emailNote = mail.emailed ? undefined : 'reason' in mail ? mail.reason : undefined;
+  } else {
+    emailNote = 'Invite created without sending email.';
+  }
   return {
     inviteUrl: verifyUrl,
     setupUrl: inviteSetupUrl(token, fields.role),
-    emailed: mail.emailed === true,
-    emailNote: mail.emailed ? undefined : 'reason' in mail ? mail.reason : undefined,
+    emailed,
+    emailNote,
     invite: {
       token,
       email: invite.email,
@@ -342,7 +486,12 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
   if (!username) return json({ error: 'username is required.' }, 400, origin);
 
   const users = await loadUsers(env);
-  const idx = users.findIndex(u => u.username === username);
+  const idx = users.findIndex(
+    u =>
+      u.username === username ||
+      normalizeEmail(u.email) === normalizeEmail(username) ||
+      normalizeEmail(u.workEmail ?? '') === normalizeEmail(username)
+  );
   if (idx < 0) return json({ error: 'Account not found.' }, 404, origin);
   const user = { ...users[idx]! };
 
@@ -428,6 +577,27 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     const { hash, salt } = await hashPassword(body.temporaryPassword.trim());
     user.passwordHash = hash;
     user.salt = salt;
+    user.mustChangePassword = true;
+  }
+
+  if (typeof body.email === 'string' && body.email.trim()) {
+    const nextEmail = normalizeEmail(body.email);
+    const emailErr = validateEmail(nextEmail);
+    if (emailErr) return json({ error: emailErr }, 400, origin);
+    const conflict = users.some(
+      (u, i) =>
+        i !== idx &&
+        (normalizeEmail(u.email) === nextEmail ||
+          normalizeEmail(u.workEmail ?? '') === nextEmail ||
+          u.username === nextEmail)
+    );
+    if (conflict) return json({ error: 'Another account already uses that email.' }, 409, origin);
+    user.email = nextEmail;
+    user.workEmail = nextEmail;
+    if (body.syncUsernameToEmail !== false && !isSeedAdminUsername(user.username)) {
+      const userTaken = users.some((u, i) => i !== idx && u.username === nextEmail);
+      if (!userTaken) user.username = nextEmail;
+    }
   }
 
   if (typeof body.active === 'boolean') {
@@ -464,6 +634,13 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
       );
     }
     user.isPeerSupportLeader = body.isPeerSupportLeader;
+  }
+
+  if (body.employmentClassification === 'civilian' || body.employmentClassification === 'sworn') {
+    user.employmentClassification = body.employmentClassification;
+  }
+  if (body.employmentClassification === null || body.employmentClassification === '') {
+    delete user.employmentClassification;
   }
 
   if (typeof body.cellPhone === 'string') {

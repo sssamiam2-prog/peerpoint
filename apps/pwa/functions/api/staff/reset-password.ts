@@ -87,7 +87,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   }
 
   const { hash, salt } = await hashPassword(password);
-  users[idx] = { ...user, passwordHash: hash, salt };
+  users[idx] = { ...user, passwordHash: hash, salt, mustChangePassword: false };
   await saveUsers(env, users);
   await deletePasswordReset(env, token);
 

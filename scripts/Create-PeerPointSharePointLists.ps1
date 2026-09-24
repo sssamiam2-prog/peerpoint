@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Creates PEERPoint SharePoint lists (PeerSupportRequests, SelfHelpContent, AuditLog) to match docs/sharepoint-lists.md.
+  Creates PEERPoint SharePoint lists (PeerSupportRequests, SelfHelpContent, PeerSupportMembers, AuditLog) to match docs/sharepoint-lists.md.
 
 .DESCRIPTION
   Requires PnP.PowerShell and a site owner (or admin) account. Run once per SharePoint site.
@@ -132,6 +132,37 @@ Ensure-FieldText -ListTitle 'SelfHelpContent' -InternalName 'Category' -DisplayN
 Ensure-FieldNumber -ListTitle 'SelfHelpContent' -InternalName 'SortOrder' -DisplayName 'Sort Order'
 Ensure-FieldBool -ListTitle 'SelfHelpContent' -InternalName 'IsPublished' -DisplayName 'Is Published'
 
+Write-Host "`n=== PeerSupportMembers (roster + ACL) ===" -ForegroundColor Cyan
+Ensure-GenericList -Title 'PeerSupportMembers' | Out-Null
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'FirstName' -DisplayName 'First Name' -Required
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'LastName' -DisplayName 'Last Name' -Required
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'Username' -DisplayName 'Username' -Required
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'Area' -DisplayName 'Area'
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'WorkPhone' -DisplayName 'Work Phone'
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'CellPhone' -DisplayName 'Cell Phone'
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'Email' -DisplayName 'Email' -Required
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'Shift' -DisplayName 'Shift'
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'JobTitle' -DisplayName 'Job Title'
+Ensure-FieldChoice -ListTitle 'PeerSupportMembers' -InternalName 'AppRole' -DisplayName 'App Role' -Choices @('staff', 'admin') -Required
+Ensure-FieldBool -ListTitle 'PeerSupportMembers' -InternalName 'IsPeerSupportLeader' -DisplayName 'Is Peer Support Leader' -Required
+Ensure-FieldBool -ListTitle 'PeerSupportMembers' -InternalName 'Active' -DisplayName 'Active' -Required
+Ensure-FieldText -ListTitle 'PeerSupportMembers' -InternalName 'AclGroup' -DisplayName 'ACL Group'
+Ensure-FieldUser -ListTitle 'PeerSupportMembers' -InternalName 'EntraUser' -DisplayName 'Entra User'
+Write-Host "  Note: do NOT add a Password column. Passwords stay in the PWA (hashed)." -ForegroundColor Yellow
+
+Write-Host "`n=== PeerSupportEvents (staff event logger → Power Automate sync) ===" -ForegroundColor Cyan
+Ensure-GenericList -Title 'PeerSupportEvents' | Out-Null
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'PeerPointEventId' -DisplayName 'PeerPoint Event Id' -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'EventDate' -DisplayName 'Event Date' -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'RecordedAt' -DisplayName 'Recorded At' -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'PrpsBureau' -DisplayName 'PRPS Bureau' -Required
+Ensure-FieldChoice -ListTitle 'PeerSupportEvents' -InternalName 'PrpsGender' -DisplayName 'PRPS Gender' -Choices @('male', 'female', 'nonBinary', 'preferNotToSay', 'unknown') -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'HelpType' -DisplayName 'Type of Help' -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'ProviderDisplayName' -DisplayName 'Peer Supporter' -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'ProviderUsername' -DisplayName 'Provider Username'
+Ensure-FieldNumber -ListTitle 'PeerSupportEvents' -InternalName 'TotalMinutes' -DisplayName 'Total Minutes' -Required
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'CreatedByDisplay' -DisplayName 'Logged By'
+
 Write-Host "`n=== AuditLog ===" -ForegroundColor Cyan
 Ensure-GenericList -Title 'AuditLog' | Out-Null
 $auditChoices = @(
@@ -143,7 +174,7 @@ Ensure-FieldNumber -ListTitle 'AuditLog' -InternalName 'RequestId' -DisplayName 
 Ensure-FieldNote -ListTitle 'AuditLog' -InternalName 'DetailsJson' -DisplayName 'Details Json'
 
 Write-Host "`n=== List IDs (for PWA .env) ===" -ForegroundColor Cyan
-foreach ($name in @('PeerSupportRequests', 'SelfHelpContent', 'AuditLog')) {
+foreach ($name in @('PeerSupportRequests', 'SelfHelpContent', 'PeerSupportMembers', 'PeerSupportEvents', 'AuditLog')) {
   $l = Get-PnPList -Identity $name
   Write-Host ("  {0,-22} {1}" -f $name, $l.Id)
 }
@@ -169,6 +200,10 @@ Write-Host @"
     VITE_GRAPH_SELFHELP_LIST_ID=(SelfHelpContent GUID)
     VITE_GRAPH_AUDIT_LIST_ID=(AuditLog GUID)
 
+  Then sync roster (no passwords):
+    .\Sync-PeerSupportMembers.ps1 -SiteUrl "<same SiteUrl>"
+
+  Bootstrap PWA passwords (lowercase firstInitial+lastName+1234, e.g. ssmith1234) via Provision-PeerSupportPwaAccounts.ps1.
   Entra: grant Sites.Selected or delegated Sites.ReadWrite.All + list permissions per your registration.
   SharePoint groups (see docs/security-hardening.md): PeerSupport_Admins, PeerSupport_HR, PeerSupport_PeerSupporters
 "@ -ForegroundColor Yellow

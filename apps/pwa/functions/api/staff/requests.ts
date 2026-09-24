@@ -139,7 +139,8 @@ export async function onRequestGet({ request, env, waitUntil }: Ctx): Promise<Re
         displayName: auth.session.displayName,
         peerAvailable: avail.peerAvailable,
         unavailableSince: avail.unavailableSince,
-        unavailableReason: avail.unavailableReason
+        unavailableReason: avail.unavailableReason,
+        mustChangePassword: meUser?.mustChangePassword === true
       }
     },
     200,

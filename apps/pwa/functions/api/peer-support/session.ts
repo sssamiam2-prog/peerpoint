@@ -1,5 +1,5 @@
-import { notifyOnCallPeerWaiting } from '../../_lib/roomNotify';
-import { pickNextOnCallPeer, type SexPreference } from '../../_lib/onCallMatch';
+import { notifyLeadersOfCoverageGap, notifyOnCallPeerWaiting } from '../../_lib/roomNotify';
+import { parseMatchPreference, pickNextOnCallPeer } from '../../_lib/onCallMatch';
 import { isValidMemberAccessCode } from '../../_lib/memberAccess';
 import { mapSessionStatus } from '../../_lib/peerSupportSession';
 import {
@@ -62,19 +62,43 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'A valid site use code is required.' }, 403, origin);
   }
 
-  const rawPreference = String(body.sexPreference ?? 'either').trim().toLowerCase();
-  const sexPreference = rawPreference as SexPreference;
-  if (sexPreference !== 'male' && sexPreference !== 'female' && sexPreference !== 'either') {
-    return json({ error: 'Choose Male, Female, or Either peer preference.' }, 400, origin);
-  }
+  const preference = parseMatchPreference({
+    ...body,
+    matchMode: body.matchMode ?? body.peerChoice ?? 'anyone',
+    sexPreference: body.sexPreference ?? 'either'
+  });
+  if ('error' in preference) return json({ error: preference.error }, 400, origin);
 
-  const match = await pickNextOnCallPeer(env, sexPreference);
-  if (!match.ok) return json({ error: match.error }, 409, origin);
+  const match = await pickNextOnCallPeer(env, preference);
+  if (!match.ok) {
+    const leaders = await notifyLeadersOfCoverageGap(env, {
+      reason: match.error,
+      contactMode: 'chat',
+      memberHint: `Modern session request (choice: ${preference.mode}).`
+    });
+    return json(
+      {
+        error: match.error,
+        leadersNotified: leaders.leadersNotified,
+        leaderCount: leaders.leaderCount
+      },
+      409,
+      origin
+    );
+  }
 
   const now = new Date();
   const nowIso = now.toISOString();
   const requestId = newId();
   const memberJoinToken = newId();
+  const prefLabel =
+    preference.mode === 'specific'
+      ? `peer ${preference.preferredUsername}`
+      : preference.mode === 'classification'
+        ? preference.preferredClassification
+        : preference.sexPreference === 'male' || preference.sexPreference === 'female'
+          ? preference.sexPreference
+          : 'anyone';
   const record: HelpRequest = {
     id: requestId,
     submittedAt: nowIso,
@@ -84,13 +108,19 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     requesterPhone: 'not provided',
     requesterEmail: 'not-provided@peerpoint.local',
     preferredContact: 'chat',
-    description: `Modern anonymous session — preferred ${sexPreference} peer`,
+    description: `Modern anonymous session — preferred ${prefLabel}`,
     consentAcknowledged: true,
     status: 'queued',
     sessionKind: 'modern',
     assignedPeer: match.chosen.displayName,
     assignedPeerUsername: match.chosen.user.username,
-    preferredPeerSex: sexPreference === 'either' ? undefined : sexPreference,
+    preferredPeerSex:
+      preference.sexPreference === 'male' || preference.sexPreference === 'female'
+        ? preference.sexPreference
+        : undefined,
+    matchMode: preference.mode,
+    preferredPeerUsername: preference.preferredUsername,
+    preferredPeerClassification: preference.preferredClassification,
     contactMode: 'chat',
     memberJoinToken,
     anonymousSessionId: newId(),
@@ -111,7 +141,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   await notifyOnCallPeerWaiting(env, {
     staff: match.chosen.user,
     contactMode: 'chat',
-    preferredSexLabel: sexPreference === 'either' ? 'Either' : sexPreference
+    preferredSexLabel: prefLabel ?? 'Anyone'
   });
 
   return json(

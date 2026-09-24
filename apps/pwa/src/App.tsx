@@ -29,6 +29,9 @@ import { ModernCheckIns } from './modern/ModernCheckIns';
 import { ModernMore } from './modern/ModernMore';
 import { ModernStaffRequests } from './modern/ModernStaffRequests';
 import { ModernStaffChat } from './modern/ModernStaffChat';
+import { ModernColoring } from './modern/ModernColoring';
+import { ColoringPage } from './pages/ColoringPage';
+import { isEventLoggerPhaseOnly } from './lib/eventLoggerPhase';
 
 function MemberNav(): React.ReactElement {
   const { pathname } = useLocation();
@@ -276,6 +279,10 @@ function ModernRoutes(): React.ReactElement {
         <Route path="/m/waiting" element={<ModernWaiting />} />
         <Route path="/m/chat" element={<ModernSessionChat />} />
         <Route path="/m/resources" element={<ModernResources />} />
+        <Route path="/m/coloring" element={<ModernColoring />} />
+        <Route path="/m/coloring/:pageId" element={<ModernColoring />} />
+        <Route path="/coloring" element={<Navigate to="/m/resources#coloring" replace />} />
+        <Route path="/coloring/:pageId" element={<ModernColoring />} />
         <Route path="/m/check-ins" element={<ModernCheckIns />} />
         <Route path="/m/more" element={<ModernMore />} />
         <Route path="/request" element={<Navigate to="/m/request" replace />} />
@@ -287,10 +294,27 @@ function ModernRoutes(): React.ReactElement {
   );
 }
 
+function EventLoggerPhaseRoutes(): React.ReactElement {
+  return (
+    <Layout>
+      <Routes>
+        <Route path="/staff" element={<StaffPage />} />
+        <Route path="/setup" element={<SetupPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/" element={<Navigate to="/staff" replace />} />
+        <Route path="*" element={<Navigate to="/staff" replace />} />
+      </Routes>
+    </Layout>
+  );
+}
+
 function AppRoutes(): React.ReactElement {
   const adminSite = isProductionAdminHost();
+  const eventLoggerPhase = isEventLoggerPhaseOnly();
   const [mode, setMode] = React.useState(getUiMode);
   React.useEffect(() => subscribeUiMode(() => setMode(getUiMode())), []);
+  if (eventLoggerPhase && !adminSite) return <EventLoggerPhaseRoutes />;
   if (mode === 'modern' && !adminSite) return <ModernRoutes />;
 
   return (
@@ -317,6 +341,8 @@ function AppRoutes(): React.ReactElement {
                 <Route path="/request" element={<RequestHelpPage />} />
                 <Route path="/self-help" element={<SelfHelpPage />} />
                 <Route path="/resources" element={<ResourcesPage />} />
+                <Route path="/coloring" element={<ColoringPage />} />
+                <Route path="/coloring/:pageId" element={<ColoringPage />} />
                 <Route path="/more" element={<MorePage />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/voice" element={<PeerVoicePage />} />

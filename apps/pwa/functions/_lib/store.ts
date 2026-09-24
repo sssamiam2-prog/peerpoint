@@ -33,6 +33,11 @@ export type Env = {
    * Default when unset: paused. Set to "0" to re-enable.
    */
   PEERPOINT_PAUSE_STAFF_NOTIFY?: string;
+  /**
+   * Bearer / X-Integration-Secret for Power Automate and SharePoint sync (GET peer support events).
+   * Falls back to CRON_SECRET when unset.
+   */
+  PEERPOINT_INTEGRATION_SECRET?: string;
 };
 
 export type HelpRequest = {
@@ -117,6 +122,7 @@ export const ROOM_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
 const REQUESTS_KEY = 'peerpoint:requests';
 const STAFF_ON_DUTY_KEY = 'peerpoint:on_duty';
 const ON_CALL_KEY = 'peerpoint:on_call';
+const CONTACT_LOG_KEY = 'peerpoint:contact_logs';
 
 /** Keep finished shifts for reporting / history. */
 const ON_CALL_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
@@ -147,6 +153,7 @@ export type OnCallSlot = {
 };
 
 let memoryRequests: HelpRequest[] = [];
+let memoryContactLogs: ContactLogStore = { months: {} };
 let memoryOnDuty: string[] = [];
 let memoryOnCall: OnCallSlot[] = [];
 
@@ -154,7 +161,7 @@ export function corsHeaders(origin: string | null): HeadersInit {
   return {
     'Access-Control-Allow-Origin': origin ?? '*',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Integration-Secret',
     'Content-Type': 'application/json'
   };
 }
@@ -422,4 +429,249 @@ export async function createAblyTokenDetailsForChannels(
     throw new Error(`Ably token failed (${res.status}): ${errText.slice(0, 240)}`);
   }
   return res.json();
+}
+
+export const CONTACT_TYPES = ['outreach', 'walkIn', 'supervisorReferral', 'ciResponse'] as const;
+export const RESOURCE_TYPES = ['vestEap', 'handout'] as const;
+export type ContactTypeKey = (typeof CONTACT_TYPES)[number];
+export type ResourceTypeKey = (typeof RESOURCE_TYPES)[number];
+
+export type MonthContactLog = {
+  year: number;
+  month: number;
+  contacts: Record<ContactTypeKey, number[]>;
+  resources: Record<ResourceTypeKey, number[]>;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByDisplay: string;
+};
+
+export type ContactLogStore = {
+  months: Record<string, MonthContactLog>;
+};
+
+export function contactLogMonthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+export function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+function emptyCounts(): number[] {
+  return Array.from({ length: 31 }, () => 0);
+}
+
+export function emptyMonthLog(year: number, month: number): MonthContactLog {
+  return {
+    year,
+    month,
+    contacts: {
+      outreach: emptyCounts(),
+      walkIn: emptyCounts(),
+      supervisorReferral: emptyCounts(),
+      ciResponse: emptyCounts()
+    },
+    resources: {
+      vestEap: emptyCounts(),
+      handout: emptyCounts()
+    },
+    updatedAt: '',
+    updatedBy: '',
+    updatedByDisplay: ''
+  };
+}
+
+function clampCount(value: unknown): number {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, 999);
+}
+
+function normalizeCountRow(raw: unknown, dim: number): number[] {
+  const src = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: 31 }, (_, i) => (i < dim ? clampCount(src[i]) : 0));
+}
+
+export function normalizeMonthLog(
+  year: number,
+  month: number,
+  raw: Partial<MonthContactLog> | undefined
+): MonthContactLog {
+  const dim = daysInMonth(year, month);
+  const base = emptyMonthLog(year, month);
+  if (!raw) return base;
+  return {
+    year,
+    month,
+    contacts: {
+      outreach: normalizeCountRow(raw.contacts?.outreach, dim),
+      walkIn: normalizeCountRow(raw.contacts?.walkIn, dim),
+      supervisorReferral: normalizeCountRow(raw.contacts?.supervisorReferral, dim),
+      ciResponse: normalizeCountRow(raw.contacts?.ciResponse, dim)
+    },
+    resources: {
+      vestEap: normalizeCountRow(raw.resources?.vestEap, dim),
+      handout: normalizeCountRow(raw.resources?.handout, dim)
+    },
+    updatedAt: String(raw.updatedAt ?? ''),
+    updatedBy: String(raw.updatedBy ?? ''),
+    updatedByDisplay: String(raw.updatedByDisplay ?? '')
+  };
+}
+
+export async function loadContactLogs(env: Env): Promise<ContactLogStore> {
+  if (env.PEERPOINT_KV) {
+    const raw = await env.PEERPOINT_KV.get(CONTACT_LOG_KEY);
+    if (!raw) return { months: {} };
+    try {
+      const parsed = JSON.parse(raw) as ContactLogStore;
+      if (!parsed || typeof parsed !== 'object' || !parsed.months) return { months: {} };
+      return parsed;
+    } catch {
+      return { months: {} };
+    }
+  }
+  return memoryContactLogs;
+}
+
+export async function saveContactLogs(env: Env, store: ContactLogStore): Promise<void> {
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.put(CONTACT_LOG_KEY, JSON.stringify(store));
+    return;
+  }
+  memoryContactLogs = store;
+}
+
+const PEER_SUPPORT_EVENTS_KEY = 'peerpoint:peer_support_events';
+const PEER_SUPPORT_HELP_TYPES_KEY = 'peerpoint:peer_support_help_types';
+
+export const DEFAULT_PEER_SUPPORT_HELP_TYPES = [
+  'Crisis / immediate support',
+  'Follow-up check-in',
+  'Supervisor referral response',
+  'Outreach or walk-in',
+  'Resource referral (EAP / VEST)',
+  'Other'
+] as const;
+
+export type PrpsGender = 'male' | 'female' | 'nonBinary' | 'preferNotToSay' | 'unknown';
+
+export type PeerSupportEvent = {
+  id: string;
+  /** Calendar date of the peer support interaction (YYYY-MM-DD). */
+  eventDate: string;
+  recordedAt: string;
+  prpsBureau: string;
+  prpsGender: PrpsGender;
+  helpType: string;
+  providerDisplayName: string;
+  providerUsername: string;
+  totalMinutes: number;
+  createdBy: string;
+  createdByDisplay: string;
+  /** Set when SharePoint sync marks this row imported (optional). */
+  sharePointImportedAt?: string;
+};
+
+export type PeerSupportEventStore = {
+  events: PeerSupportEvent[];
+};
+
+let memoryPeerSupportEvents: PeerSupportEventStore = { events: [] };
+let memoryHelpTypes: string[] = [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+
+const PRPS_GENDERS: PrpsGender[] = ['male', 'female', 'nonBinary', 'preferNotToSay', 'unknown'];
+
+export function normalizePrpsGender(raw: unknown): PrpsGender | null {
+  const s = String(raw ?? '').trim();
+  if (PRPS_GENDERS.includes(s as PrpsGender)) return s as PrpsGender;
+  const lower = s.toLowerCase();
+  if (lower === 'm' || lower === 'male') return 'male';
+  if (lower === 'f' || lower === 'female') return 'female';
+  if (lower === 'non-binary' || lower === 'nonbinary') return 'nonBinary';
+  if (lower === 'prefer not to say') return 'preferNotToSay';
+  if (lower === 'unknown') return 'unknown';
+  return null;
+}
+
+export function normalizeHelpTypes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+  const out = raw
+    .map(v => String(v ?? '').trim())
+    .filter(Boolean);
+  const unique = [...new Set(out)];
+  return unique.length ? unique : [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+}
+
+export async function loadPeerSupportHelpTypes(env: Env): Promise<string[]> {
+  if (env.PEERPOINT_KV) {
+    const raw = await env.PEERPOINT_KV.get(PEER_SUPPORT_HELP_TYPES_KEY);
+    if (!raw) return [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+    try {
+      return normalizeHelpTypes(JSON.parse(raw));
+    } catch {
+      return [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+    }
+  }
+  return memoryHelpTypes.length ? memoryHelpTypes : [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+}
+
+export async function savePeerSupportHelpTypes(env: Env, types: string[]): Promise<void> {
+  const normalized = normalizeHelpTypes(types);
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.put(PEER_SUPPORT_HELP_TYPES_KEY, JSON.stringify(normalized));
+    return;
+  }
+  memoryHelpTypes = normalized;
+}
+
+export async function loadPeerSupportEvents(env: Env): Promise<PeerSupportEventStore> {
+  if (env.PEERPOINT_KV) {
+    const raw = await env.PEERPOINT_KV.get(PEER_SUPPORT_EVENTS_KEY);
+    if (!raw) return { events: [] };
+    try {
+      const parsed = JSON.parse(raw) as PeerSupportEventStore;
+      if (!parsed || !Array.isArray(parsed.events)) return { events: [] };
+      return { events: parsed.events.filter(e => e && typeof e.id === 'string') };
+    } catch {
+      return { events: [] };
+    }
+  }
+  return memoryPeerSupportEvents;
+}
+
+export async function savePeerSupportEvents(env: Env, store: PeerSupportEventStore): Promise<void> {
+  if (env.PEERPOINT_KV) {
+    await env.PEERPOINT_KV.put(PEER_SUPPORT_EVENTS_KEY, JSON.stringify(store));
+    return;
+  }
+  memoryPeerSupportEvents = store;
+}
+
+export function integrationSecret(env: Env): string {
+  return env.PEERPOINT_INTEGRATION_SECRET?.trim() || env.CRON_SECRET?.trim() || '';
+}
+
+export function integrationAuthorized(request: Request, env: Env): boolean {
+  const secret = integrationSecret(env);
+  if (!secret) return false;
+  const header = request.headers.get('Authorization') || '';
+  const bearer = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const alt = request.headers.get('X-Integration-Secret')?.trim() || '';
+  return bearer === secret || alt === secret;
+}
+
+export function parseEventDate(raw: unknown): string | null {
+  const s = String(raw ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const t = Date.parse(`${s}T12:00:00.000Z`);
+  if (!Number.isFinite(t)) return null;
+  return s;
+}
+
+export function clampEventMinutes(raw: unknown): number | null {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.min(n, 24 * 60);
 }

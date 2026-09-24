@@ -1,5 +1,12 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  ensureSoftAudioGestureHook,
+  startAssignmentAlertLoop,
+  stopAssignmentAlertLoop,
+  testAlertSound,
+  unlockSoftAudio
+} from '../lib/softSounds';
 import { ModernBackButton } from './ModernBackButton';
 
 type SupportRequest = {
@@ -9,14 +16,30 @@ type SupportRequest = {
   supportCode?: string;
   submittedAt?: string;
   requestId?: string;
+  assignedPeerUsername?: string;
 };
+
+function loadStaffUsername(): string {
+  try {
+    const raw = sessionStorage.getItem('peerpoint_staff_meta');
+    if (!raw) return '';
+    const meta = JSON.parse(raw) as { username?: string };
+    return String(meta.username ?? '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
 
 export function ModernStaffRequests(): React.ReactElement {
   const navigate = useNavigate();
   const [items, setItems] = React.useState<SupportRequest[]>([]);
   const [tab, setTab] = React.useState('pending');
   const [error, setError] = React.useState('');
+  const [alertIds, setAlertIds] = React.useState<string[]>([]);
+  const [cleared, setCleared] = React.useState<Set<string>>(() => new Set());
+  const prevOffered = React.useRef<Set<string>>(new Set());
   const token = sessionStorage.getItem('peerpoint_staff_token');
+  const me = loadStaffUsername();
 
   const load = React.useCallback(async (): Promise<void> => {
     if (!token) {
@@ -36,8 +59,71 @@ export function ModernStaffRequests(): React.ReactElement {
   }, [navigate, token]);
 
   React.useEffect(() => {
+    ensureSoftAudioGestureHook();
+  }, []);
+
+  React.useEffect(() => {
     void load();
+    const id = window.setInterval(() => void load(), 5000);
+    return (): void => window.clearInterval(id);
   }, [load]);
+
+  React.useEffect(() => {
+    if (!me) {
+      stopAssignmentAlertLoop();
+      setAlertIds([]);
+      return;
+    }
+    const meLocal = me.includes('@') ? me.split('@')[0]! : me;
+    const offered = items.filter(r => {
+      if (r.status !== 'queued' && r.status !== 'pending') return false;
+      const assigned = String(r.assignedPeerUsername || '').toLowerCase();
+      if (!assigned) return false;
+      const assignedLocal = assigned.includes('@') ? assigned.split('@')[0]! : assigned;
+      return assigned === me || assignedLocal === meLocal;
+    });
+    const offeredIds = new Set(offered.map(r => r.requestId ?? r.id));
+    const newly: string[] = [];
+    for (const id of offeredIds) {
+      if (!prevOffered.current.has(id) && !cleared.has(id)) newly.push(id);
+    }
+    prevOffered.current = offeredIds;
+    setAlertIds(prev => {
+      const still = prev.filter(id => offeredIds.has(id) && !cleared.has(id));
+      return Array.from(new Set([...still, ...newly]));
+    });
+  }, [items, me, cleared]);
+
+  React.useEffect(() => {
+    if (alertIds.length > 0) startAssignmentAlertLoop();
+    else stopAssignmentAlertLoop();
+    return (): void => stopAssignmentAlertLoop();
+  }, [alertIds.length]);
+
+  React.useEffect(() => {
+    if (alertIds.length === 0) return;
+    const original = document.title;
+    let flip = false;
+    const id = window.setInterval(() => {
+      flip = !flip;
+      document.title = flip ? '⚠ Request waiting — PEERPoint' : original;
+    }, 1200);
+    return (): void => {
+      window.clearInterval(id);
+      document.title = original;
+    };
+  }, [alertIds.length]);
+
+  const clearAlert = (): void => {
+    unlockSoftAudio();
+    setCleared(prev => {
+      const next = new Set(prev);
+      for (const id of alertIds) next.add(id);
+      return next;
+    });
+    setAlertIds([]);
+    stopAssignmentAlertLoop();
+  };
 
   const accept = async (item: SupportRequest): Promise<void> => {
     if (!token) return;
@@ -48,9 +134,18 @@ export function ModernStaffRequests(): React.ReactElement {
       body: JSON.stringify({ action: 'acceptQueue' })
     });
     if (!response.ok) {
-      setError('Could not accept the request.');
-      return;
+      // Classic API uses body id on /api/staff/requests
+      const fallback = await fetch('/api/staff/requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'acceptQueue', id })
+      });
+      if (!fallback.ok) {
+        setError('Could not accept the request.');
+        return;
+      }
     }
+    clearAlert();
     sessionStorage.setItem(
       'peerpoint_modern_staff_session',
       JSON.stringify({
@@ -64,12 +159,37 @@ export function ModernStaffRequests(): React.ReactElement {
   const filtered = items.filter(
     item =>
       tab === 'all' ||
-      (tab === 'active' ? item.status === 'active' : !['active', 'closed'].includes(item.status ?? 'pending'))
+      (tab === 'active' ? item.status === 'active' || item.status === 'assigned' : !['active', 'assigned', 'closed'].includes(item.status ?? 'pending'))
   );
 
   return (
-    <section className="modern-page modern-staff">
+    <section className="modern-page modern-staff" onPointerDownCapture={() => unlockSoftAudio()}>
       <ModernBackButton to="/m/more" label="More" />
+      {alertIds.length > 0 ? (
+        <div className="staff-assignment-alert" role="alertdialog" aria-live="assertive">
+          <div>
+            <strong>Peer support request waiting for you</strong>
+            <p style={{ margin: '6px 0 0', fontSize: 14 }}>
+              Soft alert continues until you clear this notice or Accept the request.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                unlockSoftAudio();
+                testAlertSound();
+              }}
+            >
+              Test sound
+            </button>
+            <button type="button" className="btn-ghost" onClick={clearAlert}>
+              Clear notice &amp; stop sound
+            </button>
+          </div>
+        </div>
+      ) : null}
       <header>
         <p className="modern-eyebrow">PEERPOINT · STAFF</p>
         <h1>Support requests</h1>
@@ -95,7 +215,7 @@ export function ModernStaffRequests(): React.ReactElement {
               {item.status ?? 'Pending'} ·{' '}
               {item.submittedAt ? new Date(item.submittedAt).toLocaleTimeString() : 'Now'}
             </span>
-            {item.status !== 'active' ? (
+            {item.status !== 'active' && item.status !== 'assigned' ? (
               <button type="button" onClick={() => void accept(item)}>
                 Accept
               </button>
@@ -118,7 +238,7 @@ export function ModernStaffRequests(): React.ReactElement {
             )}
           </article>
         ))}
-        {!filtered.length ? <p className="modern-muted">No {tab} requests right now.</p> : null}
+        {filtered.length === 0 ? <p className="modern-muted">No requests in this view.</p> : null}
       </div>
     </section>
   );

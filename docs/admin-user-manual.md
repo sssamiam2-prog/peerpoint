@@ -45,8 +45,8 @@ Staff username login is **rejected** on the production Admin site.
 ## 3. Quick start for staff (daily workflow)
 
 1. Open **[https://mypeerpoint.com/staff](https://mypeerpoint.com/staff)**.
-2. Enter your **username** and **password** → **Sign in**.
-3. (First time) Use **Change password** to set a password only you know.
+2. Enter your **work email** and **password** → **Sign in**.
+3. If you received a temporary password (lowercase first initial + last name + `1234`, e.g. `ssmith1234`), the app **requires** you to set a new password before you can use staff tools.
 4. Update the **On duty** list → **Save on-duty list**.
 5. Confirm **Peer display name for assignments**.
 6. Click **Refresh** when you expect new requests.
@@ -54,6 +54,8 @@ Staff username login is **rejected** on the production Admin site.
 8. **Contact the member** and give them the **room code**. The app does **not** send the code automatically.
 9. Open **Peer chat** and/or **Peer voice** with the **same room code**.
 10. When finished → **Close** the request → **Sign out**.
+
+Lost or forgotten password: on the sign-in page click **Forgot password?**, enter your username or email, and use the reset link (expires in 1 hour). Resend email must be configured.
 
 Your session lasts about **12 hours** or until you sign out / close the tab.
 
@@ -136,9 +138,9 @@ If the member’s device cannot reach the server, the form may save a copy **onl
 | Admin login on mypeerpoint.com fails | Prefer **https://admin.mypeerpoint.com** |
 | Staff cannot sign in on Admin site | Use **https://mypeerpoint.com/staff** with username |
 | Invite email not received | Copy the invite link from Admin; set `RESEND_API_KEY` + `INVITE_FROM_EMAIL` |
-| Forgot password | Complete a new invite or ask another Admin for help |
+| Forgot password | On sign-in click **Forgot password?** and use the email reset link. If email is not configured, ask an Admin to set a temporary password (you must change it on next login). |
 | Queue empty but member submitted | Refresh; confirm success; offline local saves never hit the queue |
-| Room code not received | Codes are **not** emailed by the app — staff must share them |
+| Room code / join link not received | After Assign/Accept, check the Staff toast for email/SMS status. Configure Resend + Twilio; otherwise share the room code or join link manually |
 
 ---
 
@@ -159,9 +161,16 @@ Add `admin.mypeerpoint.com` as a **Custom domain** on the same Pages project (CN
 |------|---------|
 | `RESEND_API_KEY` | Optional — send invite emails |
 | `INVITE_FROM_EMAIL` | Optional — verified From address in Resend |
+| `TWILIO_ACCOUNT_SID` | Optional — Twilio.org SMS (join-link texts to member + staff) |
+| `TWILIO_AUTH_TOKEN` | Optional — Twilio Auth Token |
+| `TWILIO_FROM_NUMBER` | Optional — Twilio From number in E.164 (`+1801…`) |
 | `ABLY_API_KEY` | Token auth for chat/voice |
 | `TEAMS_WEBHOOK_URL` | Optional intake alerts |
 | `PEERPOINT_KV` | **Required** for accounts, invites, sessions |
+
+Set Twilio interactively from `apps/pwa`: `.\scripts\set-twilio-secrets.ps1`. After secrets are set, use Admin → **Test App Functions** → **SMS** to send a test text.
+
+When a room is assigned/accepted, Staff see a delivery summary (member/staff email + SMS). Email remains the backup if SMS is off or a phone is missing.
 
 ### Build
 

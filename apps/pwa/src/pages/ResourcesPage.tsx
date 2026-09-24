@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Link } from 'react-router-dom';
 import { VideoEmbed } from '../components/VideoEmbed';
 import { BUILT_IN_GALLERY_VIDEOS } from '../data/builtInGalleryVideos';
 
@@ -66,6 +67,17 @@ export function ResourcesPage(): React.ReactElement {
       <p className="lede">
         Self-help videos and files shared by Peer Support. Viewing gallery items is not tracked as a help request.
       </p>
+
+      <section className="coloring-promo" aria-labelledby="coloring-therapy-title">
+        <h3 id="coloring-therapy-title">Coloring Therapy</h3>
+        <p>
+          Adult mindfulness pages you can color in the app or print. Mandalas, nature, and geometric designs. Progress
+          stays on this device.
+        </p>
+        <Link className="btn-ghost" to="/coloring">
+          Open coloring pages
+        </Link>
+      </section>
 
       <section className="resource-videos" aria-labelledby="resource-videos-title">
         <h3 id="resource-videos-title" className="resource-videos__title">

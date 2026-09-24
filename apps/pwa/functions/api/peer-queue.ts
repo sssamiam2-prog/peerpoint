@@ -1,10 +1,11 @@
 import { emailRoomParticipants, notifyLeadersOfCoverageGap } from '../_lib/roomNotify';
 import {
   availabilityCounts,
+  busyOnCallUsernames,
   freeInPersonOnCallCandidates,
   freeOnCallCandidates,
-  pickNextOnCallPeer,
-  type SexPreference
+  parseMatchPreference,
+  pickNextOnCallPeer
 } from '../_lib/onCallMatch';
 import { isValidMemberAccessCode } from '../_lib/memberAccess';
 import { loadUsers } from '../_lib/staffAuth';
@@ -78,8 +79,12 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
 
   const slots = onCallActiveAt(await loadOnCallSlots(env));
   const users = await loadUsers(env);
-  const free = freeOnCallCandidates(slots, users);
-  const freeInPerson = freeInPersonOnCallCandidates(slots, users);
+  const requests = await loadRequests(env);
+  const busy = busyOnCallUsernames(requests);
+  const freeAll = freeOnCallCandidates(slots, users);
+  const free = freeAll.filter(c => !busy.has(c.user.username.toLowerCase()));
+  const freeInPersonAll = freeInPersonOnCallCandidates(slots, users);
+  const freeInPerson = freeInPersonAll.filter(c => !busy.has(c.user.username.toLowerCase()));
   const counts = availabilityCounts(free, freeInPerson);
   return json({ available: free.length > 0, ...counts }, 200, origin);
 }
@@ -106,11 +111,8 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'Choose Chat or Voice.' }, 400, origin);
   }
 
-  const sexRaw = String(body.sexPreference ?? '').trim().toLowerCase();
-  const sexPreference = (sexRaw === 'any' ? 'either' : sexRaw) as SexPreference | '';
-  if (sexPreference !== 'male' && sexPreference !== 'female' && sexPreference !== 'either') {
-    return json({ error: 'Choose Male, Female, or Either peer preference.' }, 400, origin);
-  }
+  const preference = parseMatchPreference(body);
+  if ('error' in preference) return json({ error: preference.error }, 400, origin);
 
   const displayName = String(body.displayName ?? body.requesterName ?? '').trim();
   if (displayName.length < 1) {
@@ -120,12 +122,12 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'Display name must be 40 characters or fewer.' }, 400, origin);
   }
 
-  const match = await pickNextOnCallPeer(env, sexPreference);
+  const match = await pickNextOnCallPeer(env, preference);
   if (!match.ok) {
     const leaders = await notifyLeadersOfCoverageGap(env, {
       reason: match.error,
       contactMode,
-      memberHint: `Member tried to start ${contactMode} (preference: ${sexPreference}).`
+      memberHint: `Member tried to start ${contactMode} (choice: ${preference.mode}).`
     });
     return json(
       {
@@ -144,6 +146,12 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   const roomCode = randomRoomCode();
   const requesterPhone = String(body.requesterPhone ?? '').trim() || 'not provided';
   const requesterEmail = String(body.requesterEmail ?? '').trim() || 'not-provided@peerpoint.local';
+  const prefLabel =
+    preference.mode === 'specific'
+      ? `peer ${preference.preferredUsername}`
+      : preference.mode === 'classification'
+        ? preference.preferredClassification
+        : 'anyone';
 
   const record: HelpRequest = {
     id: newId(),
@@ -154,12 +162,18 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     requesterPhone,
     requesterEmail,
     preferredContact: contactMode,
-    description: `Queued ${contactMode} — preferred ${sexPreference} peer`,
+    description: `Queued ${contactMode} — preferred ${prefLabel}`,
     consentAcknowledged: true,
     status: 'queued',
     assignedPeer: chosen.displayName,
     assignedPeerUsername: chosen.user.username,
-    preferredPeerSex: sexPreference === 'either' ? undefined : sexPreference,
+    preferredPeerSex:
+      preference.sexPreference === 'male' || preference.sexPreference === 'female'
+        ? preference.sexPreference
+        : undefined,
+    matchMode: preference.mode,
+    preferredPeerUsername: preference.preferredUsername,
+    preferredPeerClassification: preference.preferredClassification,
     contactMode,
     memberJoinToken,
     roomCode,
@@ -178,7 +192,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
 
   await notifyTeams(
     env,
-    `PEERPoint queued ${contactMode} (${record.id})\nPreferred: ${sexPreference}\nOffered to: ${chosen.user.username}\nRoom: ${roomCode}\n${notified.summary}`
+    `PEERPoint queued ${contactMode} (${record.id})\nPreferred: ${prefLabel}\nOffered to: ${chosen.user.username}\nRoom: ${roomCode}\n${notified.summary}`
   );
 
   return json(

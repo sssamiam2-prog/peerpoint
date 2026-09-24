@@ -3,7 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
-# Do not use a bare `lib/` here — it ignores every folder named `lib` (e.g. `apps/pwa/src/lib/`).
+# Do not use a bare `lib/` here  it ignores every folder named `lib` (e.g. `apps/pwa/src/lib/`).
 /lib/
 peer-support-app/lib/
 lib-dts/
@@ -51,3 +51,10 @@ Thumbs.db
 # Generated (SPFx)
 *.resx.ts
 *.scss.ts
+
+# Local Wrangler / smoke artifacts
+apps/pwa/.wrangler/
+apps/pwa/scripts/smoke-out/
+
+# Office lock files
+~$*

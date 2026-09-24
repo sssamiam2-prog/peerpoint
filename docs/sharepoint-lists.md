@@ -69,6 +69,38 @@ Columns:
 - **SortOrder** (Number, optional)
 - **IsPublished** (Yes/No, required, default No)
 
+## List: `PeerSupportMembers` (roster + ACL)
+
+Purpose: authoritative **Peer Support Team roster** (from Smartsheet) and **access-control roster** for who may use Staff/Admin tools. The live PWA still authenticates against Cloudflare KV (`peerpoint:staff_users`); this list is the SharePoint source of truth for membership and Entra/ACL mapping.
+
+**Never store passwords in this list.** Temporary passwords live only in the PWA (hashed). Staff sign in with their **work email**. First-time password: lowercase `firstInitial` + `lastName` + `1234` (e.g. Sam Smith → `ssmith1234`). Users must change password on first login; forgotten passwords use the in-app **Forgot password?** flow (email reset link).
+
+Recommended list settings:
+- **Content approval**: Off
+- **Attachments**: Off
+- **Permissions**: Admins/HR Contribute or Full Control; Peer Supporters Read (or Contribute if they maintain their own contact fields). Use this list (or a synced Entra security group) as the ACL for staff features.
+
+Columns (in addition to default `Title` = display name):
+- **FirstName** (Single line of text, required)
+- **LastName** (Single line of text, required)
+- **Username** (Single line of text, required) — PWA login identity (**work email**, lowercased)
+- **Area** (Single line of text, optional) — bureau / work area from Smartsheet
+- **WorkPhone** (Single line of text, optional)
+- **CellPhone** (Single line of text, optional)
+- **Email** (Single line of text, required) — work email used for login + password reset
+- **Shift** (Single line of text, optional)
+- **JobTitle** (Single line of text, optional) — Program Manager, Team Leader, Team Member, etc.
+- **AppRole** (Choice, required): `staff`, `admin`
+- **IsPeerSupportLeader** (Yes/No, required, default No)
+- **Active** (Yes/No, required, default Yes) — **ACL gate**: only Active members should have app access
+- **AclGroup** (Single line of text, optional) — e.g. `PeerSupport_PeerSupporters`
+- **EntraUser** (Person or Group, optional) — link to the Entra identity for SharePoint/group ACL
+
+Seed data: [`data/peer-support-members.json`](../data/peer-support-members.json) (generated from Smartsheet).  
+Provision list: [`scripts/Create-PeerPointSharePointLists.ps1`](../scripts/Create-PeerPointSharePointLists.ps1).  
+Upsert items: [`scripts/Sync-PeerSupportMembers.ps1`](../scripts/Sync-PeerSupportMembers.ps1).  
+Bootstrap PWA accounts/passwords: [`scripts/Provision-PeerSupportPwaAccounts.ps1`](../scripts/Provision-PeerSupportPwaAccounts.ps1).
+
 ## List: `AuditLog`
 
 Purpose: track key actions for compliance and investigation.

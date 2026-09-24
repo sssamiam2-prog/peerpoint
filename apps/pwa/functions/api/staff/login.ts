@@ -84,7 +84,8 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
       token,
       role: session.role,
       username: session.username,
-      displayName: session.displayName
+      displayName: session.displayName,
+      mustChangePassword: user.mustChangePassword === true
     },
     200,
     origin

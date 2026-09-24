@@ -10,7 +10,15 @@ import {
 } from '../lib/peerConfidentiality';
 import { clearModernSession, loadModernSession } from '../lib/modernSession';
 import { connectPeerSession, type PeerSessionConnection } from '../lib/peerChatAbly';
-import type { PeerChatMessage, PeerTypingPayload } from '../types/chat';
+import {
+  ensureSoftAudioGestureHook,
+  playMessageChime,
+  startPeerJoinedAlertLoop,
+  stopPeerJoinedAlertLoop,
+  testAlertSound,
+  unlockSoftAudio
+} from '../lib/softSounds';
+import type { PeerChatMessage, PeerPresenceMember, PeerTypingPayload } from '../types/chat';
 import { ModernBackButton } from './ModernBackButton';
 import { ModernCallOverlay } from './ModernCallOverlay';
 
@@ -30,11 +38,34 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
   const [tab, setTab] = React.useState<'chat' | 'details'>('chat');
   const [destroying, setDestroying] = React.useState(false);
   const [call, setCall] = React.useState<CallState>('idle');
+  const [peerJoinedAlert, setPeerJoinedAlert] = React.useState(false);
   const [noticeReady, setNoticeReady] = React.useState(
     () => staff || (id ? hasAcknowledgedConfidentiality(confidentialitySessionKey('request', id)) : false)
   );
   const [showNotice, setShowNotice] = React.useState(() => !staff && Boolean(id) && !noticeReady);
   const staffToken = staff ? sessionStorage.getItem('peerpoint_staff_token') ?? undefined : undefined;
+  const selfName = staff ? 'Peer Support Staff' : 'You';
+  const hadOtherRef = React.useRef(false);
+  const localClientIdRef = React.useRef<string | null>(null);
+  const lastChimeAtRef = React.useRef(0);
+
+  React.useEffect(() => {
+    ensureSoftAudioGestureHook();
+  }, []);
+
+  React.useEffect(() => {
+    if (!peerJoinedAlert) return;
+    const original = document.title;
+    let flip = false;
+    const id = window.setInterval(() => {
+      flip = !flip;
+      document.title = flip ? '⚠ Peer joined — PEERPoint' : original;
+    }, 1200);
+    return (): void => {
+      window.clearInterval(id);
+      document.title = original;
+    };
+  }, [peerJoinedAlert]);
 
   React.useEffect(() => {
     if (!id || (!staff && !token)) {
@@ -64,13 +95,36 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
         live = await connectPeerSession({
           requestId: id,
           channelName,
-          displayName: staff ? 'Peer Support Staff' : 'You',
+          displayName: selfName,
           sessionToken: token,
           staffToken,
-          onMessage: m =>
-            setMessages(old => (old.some(x => x.id === m.id) ? old : [...old, m])),
+          onMessage: m => {
+            setMessages(old => {
+              if (old.some(x => x.id === m.id)) return old;
+              if (m.from.trim().toLowerCase() !== selfName.toLowerCase()) {
+                const now = Date.now();
+                if (now - lastChimeAtRef.current > 400) {
+                  lastChimeAtRef.current = now;
+                  playMessageChime();
+                }
+              }
+              return [...old, m];
+            });
+          },
           onTyping: (p: PeerTypingPayload) => {
-            if (p.from !== (staff ? 'Peer Support Staff' : 'You')) setTyping(p.typing);
+            if (p.from !== selfName) setTyping(p.typing);
+          },
+          onPresence: (members: PeerPresenceMember[]) => {
+            const localId = localClientIdRef.current;
+            const others = localId
+              ? members.filter(m => m.clientId !== localId)
+              : members.filter(m => m.name.trim().toLowerCase() !== selfName.toLowerCase());
+            const hasOther = others.length > 0;
+            if (!staff && hasOther && !hadOtherRef.current) {
+              setPeerJoinedAlert(true);
+              startPeerJoinedAlertLoop();
+            }
+            hadOtherRef.current = hasOther;
           },
           onCall: payload => {
             const state = payload.state;
@@ -84,13 +138,19 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
             if (state === 'failed') setError('Chat connection failed.');
           }
         });
+        localClientIdRef.current = live.localClientId;
         setConnection(live);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Could not connect to chat.');
       }
     })();
-    return () => live?.close();
-  }, [id, navigate, noticeReady, staff, staffToken, token]);
+    return () => {
+      stopPeerJoinedAlertLoop();
+      hadOtherRef.current = false;
+      localClientIdRef.current = null;
+      live?.close();
+    };
+  }, [id, navigate, noticeReady, selfName, staff, staffToken, token]);
 
   const send = async (): Promise<void> => {
     if (!connection || !draft.trim()) return;
@@ -150,7 +210,7 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
   if (!id) return <div />;
 
   return (
-    <section className="modern-chat">
+    <section className="modern-chat" onPointerDownCapture={() => unlockSoftAudio()}>
       {!staff ? (
         <PeerConfidentialityModal
           open={showNotice}
@@ -165,6 +225,39 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
             navigate('/m/waiting', { replace: true });
           }}
         />
+      ) : null}
+      {peerJoinedAlert ? (
+        <div className="peer-joined-alert" role="alertdialog" aria-live="assertive">
+          <div>
+            <strong>Peer Support staff joined</strong>
+            <p style={{ margin: '6px 0 0', fontSize: 14 }}>
+              Soft alert continues until you clear this notice.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                unlockSoftAudio();
+                testAlertSound();
+              }}
+            >
+              Test sound
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setPeerJoinedAlert(false);
+                stopPeerJoinedAlertLoop();
+                unlockSoftAudio();
+              }}
+            >
+              Clear notice &amp; stop sound
+            </button>
+          </div>
+        </div>
       ) : null}
       <ModernBackButton to={staff ? '/m/staff' : '/'} label={staff ? 'Requests' : 'Home'} />
       <header>

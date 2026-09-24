@@ -52,7 +52,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   if (!ok) return json({ error: 'Current password is incorrect.' }, 401, origin);
 
   const { hash, salt } = await hashPassword(newPassword);
-  users[idx] = { ...user, passwordHash: hash, salt };
+  users[idx] = { ...user, passwordHash: hash, salt, mustChangePassword: false };
   await saveUsers(env, users);
-  return json({ ok: true }, 200, origin);
+  return json({ ok: true, mustChangePassword: false }, 200, origin);
 }

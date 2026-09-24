@@ -22,6 +22,10 @@ export function MorePage(): React.ReactElement {
       <UiModeToggle variant="card" />
 
       <nav className="more-page__list" aria-label="More options">
+        <Link to="/coloring" className="more-page__link">
+          <span className="more-page__link-label">Coloring Therapy</span>
+          <span className="more-page__link-hint">Adult coloring pages — color in the app or print</span>
+        </Link>
         <Link to="/chat" className="more-page__link">
           <span className="more-page__link-label">Peer chat</span>
           <span className="more-page__link-hint">Enter a room code to text with a peer</span>

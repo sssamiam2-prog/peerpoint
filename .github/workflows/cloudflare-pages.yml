@@ -41,6 +41,7 @@ jobs:
         env:
           VITE_ABLY_KEY: ${{ secrets.VITE_ABLY_KEY }}
           VITE_ABLY_AUTH_URL: ${{ secrets.VITE_ABLY_AUTH_URL }}
+          VITE_PEERPOINT_EVENT_LOGGER_PHASE: '1'
         run: |
           npm ci
           npm run build

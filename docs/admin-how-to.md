@@ -51,7 +51,20 @@ Staff sign in at **https://mypeerpoint.com/staff**. Additional Admins sign in at
 
 - **Disable / Enable** — block or restore sign-in (except the seed Admin account).
 - **Make Admin / Make Staff** — change access level (except the seed Admin account).
-- **Change password** — each user updates their own password after login.
+- **Temporary passwords** — when you provision or reset a password, the member must change it on next login.
+- **Change password** — each user updates their own password after login (required on first login after a temporary password).
+- **Forgot password** — on Staff/Admin sign-in, members click **Forgot password?**, enter username or email, and receive a one-hour reset link (requires Resend email configured).
+
+### Peer Support Members list (SharePoint ACL)
+
+The SharePoint list **PeerSupportMembers** holds the team roster and Active/ACL flags. Create/sync with:
+
+1. `scripts/Create-PeerPointSharePointLists.ps1 -SiteUrl "https://…/sites/SH-PSB"`
+2. `scripts/Sync-PeerSupportMembers.ps1 -SiteUrl "https://…/sites/SH-PSB"`
+3. Bootstrap PWA logins (lowercase first initial + last name + `1234`, e.g. `ssmith1234`):  
+   `scripts/Provision-PeerSupportPwaAccounts.ps1 -BaseUrl "https://mypeerpoint.com" -AdminToken "<admin bearer>" -ResetExisting`
+
+Do **not** store passwords in SharePoint. See `docs/sharepoint-lists.md`.
 
 ---
 
@@ -106,19 +119,21 @@ Staff username login is rejected on the production Admin site.
 | Invite email not received | Copy the **invite link** from the Admin site and share privately; check Resend secrets |
 | Invite expired | Resend or create a new invite (links expire in 7 days) |
 | Queue empty but a member says they submitted | Refresh; offline/local saves on the member’s device never appear in the queue |
-| Member never got a room code | Codes are not emailed by the app — you must share them |
+| Member never got a room code / join text | After Assign/Accept, check the toast for email/SMS status. SMS needs Twilio secrets (below). Email needs Resend. You can still share the room code or join link manually. |
+| SMS test fails | Admin → **Test App Functions** → **SMS**. If “Not configured”, set `TWILIO_*` secrets (see IT notes). |
 
 ---
 
 ## 8. Admin checklist
 
-- [ ] Open https://admin.mypeerpoint.com and sign in with your Admin username  
+- [ ] Open https://admin.mypeerpoint.com and sign in with your Admin username or email  
 - [ ] Change the seed Admin password after first login  
 - [ ] Invite Staff/Admin with profile fields + email  
 - [ ] Confirm invitees complete `/setup`  
 - [ ] Disable accounts as needed  
 - [ ] Keep the on-duty list current; assign and close requests  
+- [ ] (Optional) Send a Twilio test SMS from **Test App Functions**  
 
-**IT notes:** Cloudflare Pages needs `PEERPOINT_KV`, optional `RESEND_API_KEY` + `INVITE_FROM_EMAIL` for email invites.
+**IT notes:** Cloudflare Pages needs `PEERPOINT_KV`, optional `RESEND_API_KEY` + `INVITE_FROM_EMAIL` for email, optional `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_FROM_NUMBER` for SMS join alerts (`apps/pwa/scripts/set-twilio-secrets.ps1`).
 
 **Emergencies:** 911 · **Crisis:** 988 · **Peer line:** 801-548-8002 · **Email:** slcosopeersupport@saltlakecounty.gov

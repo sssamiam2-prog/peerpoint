@@ -3,12 +3,29 @@ import { Link } from 'react-router-dom';
 import { useActionFeedback, type SuccessToast } from '../components/ActionFeedback';
 import { AdminContentPanel } from '../components/AdminContentPanel';
 import { AdminTestPanel } from '../components/AdminTestPanel';
+import { ContactLogPanel } from '../components/ContactLogPanel';
+import { PeerSupportEventLoggerPanel } from '../components/PeerSupportEventLoggerPanel';
+import { PeerSupportHelpTypesAdmin } from '../components/PeerSupportHelpTypesAdmin';
+import { isEventLoggerPhaseOnly } from '../lib/eventLoggerPhase';
 import { TwilioPhoneVerify } from '../components/TwilioPhoneVerify';
 import { ADMIN_HOST, isAdminHostClient, isProductionAdminHost } from '../lib/adminHost';
 import { parseStaffImportFile, staffImportTemplateCsv } from '../lib/staffImport';
+import {
+  ensureSoftAudioGestureHook,
+  startAssignmentAlertLoop,
+  stopAllSoftAlerts,
+  stopAssignmentAlertLoop,
+  testAlertSound,
+  unlockSoftAudio
+} from '../lib/softSounds';
 
 const STAFF_TOKEN_KEY = 'peerpoint_staff_token';
 const STAFF_META_KEY = 'peerpoint_staff_meta';
+
+function isMasterAdminUsername(username: string): boolean {
+  const u = username.trim().toLowerCase();
+  return u === 'admin' || u === 'admn';
+}
 
 type RequestNote = {
   id: string;
@@ -56,6 +73,7 @@ type SessionMeta = {
   peerAvailable?: boolean;
   unavailableSince?: string;
   unavailableReason?: string;
+  mustChangePassword?: boolean;
 };
 
 type PublicAccount = {
@@ -72,6 +90,7 @@ type PublicAccount = {
   setupComplete: boolean;
   createdAt: string;
   isPeerSupportLeader?: boolean;
+  mustChangePassword?: boolean;
   twilioPhoneVerified?: boolean;
   emailVerified?: boolean;
   cellPhone?: string;
@@ -133,7 +152,16 @@ type ReportPayload = {
   onCallHistory: OnCallSlot[];
 };
 
-type WorkspaceTab = 'requests' | 'onCall' | 'members' | 'content' | 'reports' | 'test' | 'account';
+type WorkspaceTab =
+  | 'peerEvents'
+  | 'requests'
+  | 'onCall'
+  | 'contacts'
+  | 'members'
+  | 'content'
+  | 'reports'
+  | 'test'
+  | 'account';
 
 type RosterPerson = {
   username: string;
@@ -248,6 +276,10 @@ export function StaffPage(): React.ReactElement {
   const [forgotMsg, setForgotMsg] = React.useState<string | undefined>();
   const [availabilityConfirm, setAvailabilityConfirm] = React.useState<string | undefined>();
   const [availabilityBusy, setAvailabilityBusy] = React.useState(false);
+  /** Offered queue request ids currently sounding / banner-alerting. */
+  const [alertRequestIds, setAlertRequestIds] = React.useState<string[]>([]);
+  const [clearedAlertIds, setClearedAlertIds] = React.useState<Set<string>>(() => new Set());
+  const prevOfferedRef = React.useRef<Set<string>>(new Set());
 
   const [accounts, setAccounts] = React.useState<PublicAccount[]>([]);
   const [pendingInvites, setPendingInvites] = React.useState<PendingInvite[]>([]);
@@ -275,7 +307,9 @@ export function StaffPage(): React.ReactElement {
   const [bulkResultSummary, setBulkResultSummary] = React.useState<string | undefined>(undefined);
   const bulkFileRef = React.useRef<HTMLInputElement | null>(null);
   const [lastInviteUrl, setLastInviteUrl] = React.useState<string | undefined>();
-  const [activeTab, setActiveTab] = React.useState<WorkspaceTab>('requests');
+  const [activeTab, setActiveTab] = React.useState<WorkspaceTab>(
+    isEventLoggerPhaseOnly() ? 'peerEvents' : 'requests'
+  );
 
   const authHeaders = React.useCallback((): HeadersInit => {
     if (!token) return {};
@@ -290,6 +324,7 @@ export function StaffPage(): React.ReactElement {
   };
 
   const clearSession = (): void => {
+    stopAllSoftAlerts();
     sessionStorage.removeItem(STAFF_TOKEN_KEY);
     sessionStorage.removeItem(STAFF_META_KEY);
     setToken(null);
@@ -297,6 +332,8 @@ export function StaffPage(): React.ReactElement {
     setRequests([]);
     setAccounts([]);
     setPendingInvites([]);
+    setAlertRequestIds([]);
+    setClearedAlertIds(new Set());
   };
 
   const refreshAccounts = React.useCallback(async (): Promise<void> => {
@@ -370,6 +407,93 @@ export function StaffPage(): React.ReactElement {
     }
   }, [token, refresh, refreshAccounts, meta?.role]);
 
+  // Poll while signed in so assignment offers surface quickly (email/SMS already fire server-side).
+  React.useEffect(() => {
+    if (!token || meta?.mustChangePassword) return;
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 5000);
+    return (): void => window.clearInterval(id);
+  }, [token, meta?.mustChangePassword, refresh]);
+
+  React.useEffect(() => {
+    ensureSoftAudioGestureHook();
+  }, []);
+
+  // Soft looping alert while a queue item is offered to this staff member (until cleared / accepted / declined).
+  React.useEffect(() => {
+    if (!token || !meta?.username || meta.mustChangePassword) {
+      stopAssignmentAlertLoop();
+      setAlertRequestIds([]);
+      return;
+    }
+    const me = String(meta.username).toLowerCase();
+    const meLocal = me.includes('@') ? me.split('@')[0]! : me;
+    const offered = requests.filter(r => {
+      if (r.status !== 'queued') return false;
+      const assigned = String(r.assignedPeerUsername || '').toLowerCase();
+      if (!assigned) return false;
+      const assignedLocal = assigned.includes('@') ? assigned.split('@')[0]! : assigned;
+      return assigned === me || assignedLocal === meLocal;
+    });
+    const offeredIds = new Set(offered.map(r => r.id));
+    const newlyOffered: string[] = [];
+    for (const id of offeredIds) {
+      if (!prevOfferedRef.current.has(id) && !clearedAlertIds.has(id)) newlyOffered.push(id);
+    }
+    prevOfferedRef.current = offeredIds;
+
+    setAlertRequestIds(prev => {
+      const still = prev.filter(id => offeredIds.has(id) && !clearedAlertIds.has(id));
+      const next = Array.from(new Set([...still, ...newlyOffered.filter(id => !clearedAlertIds.has(id))]));
+      return next;
+    });
+  }, [requests, token, meta?.username, meta?.mustChangePassword, clearedAlertIds]);
+
+  React.useEffect(() => {
+    if (alertRequestIds.length > 0) {
+      unlockSoftAudio();
+      startAssignmentAlertLoop();
+    } else {
+      stopAssignmentAlertLoop();
+    }
+    return (): void => {
+      stopAssignmentAlertLoop();
+    };
+  }, [alertRequestIds.length]);
+
+  // Blink the browser tab title while an assignment alert is active.
+  React.useEffect(() => {
+    if (alertRequestIds.length === 0) return;
+    const original = document.title;
+    let flip = false;
+    const id = window.setInterval(() => {
+      flip = !flip;
+      document.title = flip ? '⚠ Request waiting — PEERPoint' : original;
+    }, 1200);
+    return (): void => {
+      window.clearInterval(id);
+      document.title = original;
+    };
+  }, [alertRequestIds.length]);
+
+  React.useEffect(() => {
+    return (): void => {
+      stopAllSoftAlerts();
+    };
+  }, []);
+
+  const clearAssignmentAlert = React.useCallback((ids?: string[]): void => {
+    unlockSoftAudio();
+    setClearedAlertIds(prev => {
+      const next = new Set(prev);
+      for (const id of ids ?? alertRequestIds) next.add(id);
+      return next;
+    });
+    setAlertRequestIds(prev => (ids ? prev.filter(id => !ids.includes(id)) : []));
+    stopAssignmentAlertLoop();
+  }, [alertRequestIds]);
+
   React.useEffect(() => {
     if (token && meta?.role === 'admin' && activeTab === 'reports') {
       void refreshReports();
@@ -400,6 +524,7 @@ export function StaffPage(): React.ReactElement {
         role?: StaffRole;
         username?: string;
         displayName?: string;
+        mustChangePassword?: boolean;
         error?: string;
       };
       if (!res.ok || !data.token || !data.role) {
@@ -418,7 +543,8 @@ export function StaffPage(): React.ReactElement {
       const nextMeta: SessionMeta = {
         role: data.role,
         username: data.username,
-        displayName: data.displayName
+        displayName: data.displayName,
+        mustChangePassword: data.mustChangePassword === true
       };
       persistSession(data.token, nextMeta);
       setPassword('');
@@ -449,7 +575,7 @@ export function StaffPage(): React.ReactElement {
         headers: authHeaders(),
         body: JSON.stringify({ currentPassword, newPassword })
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      const data = (await res.json().catch(() => ({}))) as { error?: string; mustChangePassword?: boolean };
       if (!res.ok) {
         setError(data.error ?? 'Could not change password.');
         return null;
@@ -457,6 +583,11 @@ export function StaffPage(): React.ReactElement {
       setCurrentPassword('');
       setNewPassword('');
       setPasswordMsg('Password updated.');
+      if (meta) {
+        const next = { ...meta, mustChangePassword: false };
+        setMeta(next);
+        sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(next));
+      }
       return { title: 'Password updated', message: 'Your password has been changed.' };
     }, toast => toast ?? undefined);
   };
@@ -936,6 +1067,7 @@ export function StaffPage(): React.ReactElement {
           setError(data.error ?? 'Could not accept.');
           return null;
         }
+        clearAssignmentAlert([id]);
         await refresh();
         const room = data.roomCode ? ` Room ${data.roomCode}.` : '';
         const summary = data.emailed?.summary ?? 'Member notified when email/SMS is configured.';
@@ -969,6 +1101,7 @@ export function StaffPage(): React.ReactElement {
           setError(data.error ?? 'Could not decline.');
           return null;
         }
+        clearAssignmentAlert([id]);
         await refresh();
         if (data.reoffered) {
           return {
@@ -1212,8 +1345,8 @@ export function StaffPage(): React.ReactElement {
           {onProdAdminHost
             ? `Enter your Admin username or email and password. Production Admin URL: https://${ADMIN_HOST}`
             : mode === 'admin'
-              ? 'Sign in with your Admin username or email and password. Works in this installed app on Windows, Mac, or phone.'
-              : 'For Peer Support staff and on-duty peers. Sign in with your Staff username or email and password.'}
+              ? 'Sign in with your Admin email (or username) and password. Works in this installed app on Windows, Mac, or phone.'
+              : 'For Peer Support staff and on-duty peers. Sign in with your work email and temporary password (lowercase first initial + last name + 1234, e.g. ssmith1234), then choose a new password.'}
         </p>
 
         {!onProdAdminHost ? (
@@ -1251,14 +1384,14 @@ export function StaffPage(): React.ReactElement {
 
         {error && <div style={{ color: '#a4262c', marginTop: 8 }}>{error}</div>}
         <label style={{ display: 'block', marginTop: 16 }}>
-          Username or email
+          Email
           <input
             value={username}
             onChange={e => setUsername(e.target.value)}
             autoComplete="username"
             required
             name="username"
-            placeholder={mode === 'admin' ? 'Admin username or email' : 'Staff username or email'}
+            placeholder={mode === 'admin' ? 'Admin email or username' : 'Work email'}
           />
         </label>
         <label style={{ display: 'block', marginTop: 12 }}>
@@ -1366,7 +1499,59 @@ export function StaffPage(): React.ReactElement {
     );
   }
 
+  if (meta?.mustChangePassword) {
+    return (
+      <div className="page-shell page-shell-tight">
+        <h2>Change your temporary password</h2>
+        <p className="lede">
+          Your account was set up with a temporary password. Choose a new password before continuing.
+          Use at least 8 characters.
+        </p>
+        {error && <div style={{ color: '#a4262c', marginTop: 8 }}>{error}</div>}
+        {passwordMsg ? <p style={{ color: 'var(--accent, #0f6a4a)' }}>{passwordMsg}</p> : null}
+        <form
+          autoComplete="off"
+          onSubmit={e => {
+            e.preventDefault();
+            void onChangePassword();
+          }}
+          style={{ display: 'grid', gap: 8, maxWidth: 420, marginTop: 16 }}
+        >
+          <label>
+            Current (temporary) password
+            <input
+              type="password"
+              name="peerpoint-current-password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            New password
+            <input
+              type="password"
+              name="peerpoint-new-password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              required
+            />
+          </label>
+          <button type="submit">Save new password</button>
+        </form>
+        <p style={{ marginTop: 16, fontSize: 14 }}>
+          <button type="button" className="linkish" onClick={() => void onLogout()}>
+            Sign out
+          </button>
+        </p>
+      </div>
+    );
+  }
+
   const isAdmin = meta?.role === 'admin';
+  const staffEventLoggerOnly = isEventLoggerPhaseOnly() && !isAdmin;
   // Admin tools work in the installable member app (Windows/desktop PWA), not only on the Admin host.
   const showMembersTab = isAdmin;
   const showContentTab = isAdmin;
@@ -1374,24 +1559,75 @@ export function StaffPage(): React.ReactElement {
   const showTestTab = isAdmin;
   const adminOnlyTabs: WorkspaceTab[] = ['members', 'content', 'reports', 'test'];
   const tab =
-    adminOnlyTabs.includes(activeTab) && !showMembersTab && activeTab === 'members'
-      ? 'requests'
-      : adminOnlyTabs.includes(activeTab) && activeTab === 'content' && !showContentTab
+    staffEventLoggerOnly && activeTab !== 'peerEvents' && activeTab !== 'account'
+      ? 'peerEvents'
+      : adminOnlyTabs.includes(activeTab) && !showMembersTab && activeTab === 'members'
         ? 'requests'
-        : adminOnlyTabs.includes(activeTab) && activeTab === 'reports' && !showReportsTab
+        : adminOnlyTabs.includes(activeTab) && activeTab === 'content' && !showContentTab
           ? 'requests'
-          : adminOnlyTabs.includes(activeTab) && activeTab === 'test' && !showTestTab
+          : adminOnlyTabs.includes(activeTab) && activeTab === 'reports' && !showReportsTab
             ? 'requests'
-            : activeTab;
+            : adminOnlyTabs.includes(activeTab) && activeTab === 'test' && !showTestTab
+              ? 'requests'
+              : activeTab;
 
   const isAvailable = meta?.peerAvailable !== false;
   const welcomeName = meta?.displayName || meta?.username || (isAdmin ? 'Admin' : 'Staff');
 
   return (
-    <div className="page-shell">
+    <div className="page-shell" onPointerDownCapture={() => unlockSoftAudio()}>
+      {staffEventLoggerOnly ? (
+        <p style={{ marginTop: 12, fontSize: 14, maxWidth: 640 }}>
+          Training mode: use the <strong>Event Logger</strong> to record peer support interactions. Other PEERPoint
+          features will be enabled later.
+        </p>
+      ) : null}
+
+      {alertRequestIds.length > 0 && !staffEventLoggerOnly ? (
+        <div
+          className="staff-assignment-alert"
+          role="alertdialog"
+          aria-live="assertive"
+          aria-label="Peer support request waiting"
+        >
+          <div>
+            <strong>Peer support request waiting for you</strong>
+            <p style={{ margin: '6px 0 0', fontSize: 14 }}>
+              A member was matched to you. Soft alert sound will keep playing until you clear this notice or
+              Accept / Decline on the request.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('requests');
+                unlockSoftAudio();
+              }}
+            >
+              View request
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                unlockSoftAudio();
+                testAlertSound();
+              }}
+            >
+              Test sound
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => clearAssignmentAlert()}>
+              Clear notice &amp; stop sound
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ margin: 0 }}>{isAdmin ? 'Admin workspace' : 'Staff workspace'}</h2>
+          <h2 style={{ margin: 0 }}>
+            {isAdmin ? 'Admin workspace' : staffEventLoggerOnly ? 'Peer Support Event Logger' : 'Staff workspace'}
+          </h2>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {isAdmin && !onProdAdminHost ? (
@@ -1409,6 +1645,7 @@ export function StaffPage(): React.ReactElement {
         </div>
       </div>
 
+      {!staffEventLoggerOnly ? (
       <section
         className="staff-welcome"
         aria-label="Welcome and availability"
@@ -1506,7 +1743,28 @@ export function StaffPage(): React.ReactElement {
           </p>
         ) : null}
       </section>
+      ) : (
+        <section
+          className="staff-welcome"
+          aria-label="Welcome"
+          style={{
+            marginTop: 14,
+            padding: 16,
+            borderRadius: 14,
+            border: '2px solid var(--accent, #0f6a4a)',
+            background: 'var(--social-bg, #f6faf7)',
+            maxWidth: 640
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: 22 }}>Welcome, {welcomeName}</h3>
+          <p style={{ margin: '6px 0 0', fontSize: 14 }}>
+            Signed in as <strong>Staff</strong>
+            {meta?.username ? ` (${meta.username})` : ''}. Record each peer support event on the Event Logger tab.
+          </p>
+        </section>
+      )}
 
+      {!staffEventLoggerOnly ? (
       <p style={{ marginTop: 10, fontSize: 14 }}>
         {showTestTab ? (
           <>
@@ -1520,6 +1778,7 @@ export function StaffPage(): React.ReactElement {
           </>
         )}
       </p>
+      ) : null}
       {error && <div style={{ color: '#a4262c', marginTop: 8 }}>{error}</div>}
       {info && <div style={{ color: 'var(--accent, #0f6a4a)', marginTop: 8 }}>{info}</div>}
 
@@ -1527,25 +1786,51 @@ export function StaffPage(): React.ReactElement {
         <button
           type="button"
           role="tab"
-          id="tab-requests"
-          aria-selected={tab === 'requests'}
-          aria-controls="panel-requests"
-          className={tab === 'requests' ? 'staff-tab is-active' : 'staff-tab'}
-          onClick={() => setActiveTab('requests')}
+          id="tab-peerEvents"
+          aria-selected={tab === 'peerEvents'}
+          aria-controls="panel-peerEvents"
+          className={tab === 'peerEvents' ? 'staff-tab is-active' : 'staff-tab'}
+          onClick={() => setActiveTab('peerEvents')}
         >
-          Requests
+          Event Logger
         </button>
-        <button
-          type="button"
-          role="tab"
-          id="tab-onCall"
-          aria-selected={tab === 'onCall'}
-          aria-controls="panel-onCall"
-          className={tab === 'onCall' ? 'staff-tab is-active' : 'staff-tab'}
-          onClick={() => setActiveTab('onCall')}
-        >
-          On Call
-        </button>
+        {!staffEventLoggerOnly ? (
+          <>
+            <button
+              type="button"
+              role="tab"
+              id="tab-requests"
+              aria-selected={tab === 'requests'}
+              aria-controls="panel-requests"
+              className={tab === 'requests' ? 'staff-tab is-active' : 'staff-tab'}
+              onClick={() => setActiveTab('requests')}
+            >
+              Requests
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-onCall"
+              aria-selected={tab === 'onCall'}
+              aria-controls="panel-onCall"
+              className={tab === 'onCall' ? 'staff-tab is-active' : 'staff-tab'}
+              onClick={() => setActiveTab('onCall')}
+            >
+              On Call
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-contacts"
+              aria-selected={tab === 'contacts'}
+              aria-controls="panel-contacts"
+              className={tab === 'contacts' ? 'staff-tab is-active' : 'staff-tab'}
+              onClick={() => setActiveTab('contacts')}
+            >
+              Contacts
+            </button>
+          </>
+        ) : null}
         {showMembersTab ? (
           <button
             type="button"
@@ -1611,7 +1896,18 @@ export function StaffPage(): React.ReactElement {
         </button>
       </div>
 
-      {tab === 'requests' ? (
+      {tab === 'peerEvents' ? (
+        <PeerSupportEventLoggerPanel
+          authHeaders={authHeaders}
+          defaultProvider={
+            meta?.username
+              ? { username: meta.username, displayName: meta.displayName || meta.username }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {tab === 'requests' && !staffEventLoggerOnly ? (
         <section
           className="staff-tab-panel"
           role="tabpanel"
@@ -1851,7 +2147,7 @@ export function StaffPage(): React.ReactElement {
         </section>
       ) : null}
 
-      {tab === 'onCall' ? (
+      {tab === 'onCall' && !staffEventLoggerOnly ? (
         <section className="staff-tab-panel" role="tabpanel" id="panel-onCall" aria-labelledby="tab-onCall">
           <h3 style={{ marginTop: 0 }}>On Call schedule</h3>
           <p style={{ fontSize: 14, color: 'var(--text)' }}>
@@ -2398,12 +2694,12 @@ export function StaffPage(): React.ReactElement {
                   </span>
                 </span>
                 <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {a.username !== 'admin' ? (
+                  {!isMasterAdminUsername(a.username) ? (
                     <button type="button" className="btn-ghost" onClick={() => void onResendAccountEmailVerify(a)}>
                       Resend email verify
                     </button>
                   ) : null}
-                  {a.username !== 'admin' ? (
+                  {!isMasterAdminUsername(a.username) ? (
                     <button
                       type="button"
                       className="btn-ghost"
@@ -2414,22 +2710,22 @@ export function StaffPage(): React.ReactElement {
                       Retrigger phone verify
                     </button>
                   ) : null}
-                  {a.username !== 'admin' && a.sex !== 'male' ? (
+                  {!isMasterAdminUsername(a.username) && a.sex !== 'male' ? (
                     <button type="button" className="btn-ghost" onClick={() => void onChangeSex(a, 'male')}>
                       Set Male
                     </button>
                   ) : null}
-                  {a.username !== 'admin' && a.sex !== 'female' ? (
+                  {!isMasterAdminUsername(a.username) && a.sex !== 'female' ? (
                     <button type="button" className="btn-ghost" onClick={() => void onChangeSex(a, 'female')}>
                       Set Female
                     </button>
                   ) : null}
-                  {a.username !== 'admin' ? (
+                  {!isMasterAdminUsername(a.username) ? (
                     <button type="button" className="btn-ghost" onClick={() => void onToggleLeader(a)}>
                       {a.isPeerSupportLeader ? 'Remove Leader' : 'Make Leader'}
                     </button>
                   ) : null}
-                  {a.username !== 'admin' ? (
+                  {!isMasterAdminUsername(a.username) ? (
                     <button
                       type="button"
                       className="btn-ghost"
@@ -2438,7 +2734,7 @@ export function StaffPage(): React.ReactElement {
                       Make {a.role === 'admin' ? 'Staff' : 'Admin'}
                     </button>
                   ) : null}
-                  {a.username !== 'admin' ? (
+                  {!isMasterAdminUsername(a.username) ? (
                     <button type="button" className="btn-ghost" onClick={() => void onToggleActive(a)}>
                       {a.active ? 'Disable' : 'Enable'}
                     </button>
@@ -2450,7 +2746,14 @@ export function StaffPage(): React.ReactElement {
         </section>
       ) : null}
 
-      {tab === 'content' && showContentTab ? <AdminContentPanel authHeaders={authHeaders} /> : null}
+      {tab === 'content' && showContentTab ? (
+        <>
+          <AdminContentPanel authHeaders={authHeaders} />
+          <PeerSupportHelpTypesAdmin authHeaders={authHeaders} />
+        </>
+      ) : null}
+
+      {tab === 'contacts' && !staffEventLoggerOnly ? <ContactLogPanel authHeaders={authHeaders} /> : null}
 
       {tab === 'test' && showTestTab ? (
         <AdminTestPanel authHeaders={authHeaders} onAdminHost={onAdminHost} />

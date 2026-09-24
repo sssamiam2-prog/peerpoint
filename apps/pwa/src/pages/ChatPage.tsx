@@ -16,6 +16,14 @@ import {
   confidentialitySessionKey,
   hasAcknowledgedConfidentiality
 } from '../lib/peerConfidentiality';
+import {
+  ensureSoftAudioGestureHook,
+  playMessageChime,
+  startPeerJoinedAlertLoop,
+  stopPeerJoinedAlertLoop,
+  testAlertSound,
+  unlockSoftAudio
+} from '../lib/softSounds';
 import type { PeerChatMessage, PeerPresenceMember } from '../types/chat';
 
 const DISPLAY_KEY = 'peerpoint_chat_display_name';
@@ -86,6 +94,7 @@ export function ChatPage(): React.ReactElement {
   const [connectionId, setConnectionId] = React.useState<string | null>(null);
   const [destroying, setDestroying] = React.useState(false);
   const [pendingJoin, setPendingJoin] = React.useState<{ room: string; name: string } | null>(null);
+  const [peerJoinedAlert, setPeerJoinedAlert] = React.useState(false);
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const composerRef = React.useRef<HTMLTextAreaElement | null>(null);
   const seenIds = React.useRef<Set<string>>(new Set());
@@ -95,6 +104,9 @@ export function ChatPage(): React.ReactElement {
   const typingThrottleAtRef = React.useRef(0);
   const chatEpochRef = React.useRef(0);
   const sessionNameRef = React.useRef('');
+  const hadOtherInRoomRef = React.useRef(false);
+  const lastMessageChimeAtRef = React.useRef(0);
+  const localClientIdRef = React.useRef<string | null>(null);
 
   const resizeComposer = React.useCallback((): void => {
     const el = composerRef.current;
@@ -124,8 +136,17 @@ export function ChatPage(): React.ReactElement {
   const inboundRelayRef = React.useRef<(msg: PeerChatMessage) => void>(() => {});
   /* eslint-disable-next-line react-hooks/refs -- assign latest relay without effect churn */
   inboundRelayRef.current = (msg: PeerChatMessage): void => {
+    const isSelf = isSelfMessage(msg.from, sessionNameRef.current);
+    const already = seenIds.current.has(msg.id);
     appendMessages([msg]);
     setTypingOthers(prev => prev.filter(n => n !== msg.from));
+    if (!isSelf && !already) {
+      const now = Date.now();
+      if (now - lastMessageChimeAtRef.current > 400) {
+        lastMessageChimeAtRef.current = now;
+        playMessageChime();
+      }
+    }
   };
   const relayInbound = React.useCallback((msg: PeerChatMessage) => {
     inboundRelayRef.current(msg);
@@ -155,6 +176,24 @@ export function ChatPage(): React.ReactElement {
       void pub(false);
     }, 2200);
   }, [connState]);
+
+  React.useEffect(() => {
+    ensureSoftAudioGestureHook();
+  }, []);
+
+  React.useEffect(() => {
+    if (!peerJoinedAlert) return;
+    const original = document.title;
+    let flip = false;
+    const id = window.setInterval(() => {
+      flip = !flip;
+      document.title = flip ? '⚠ Peer joined — PEERPoint' : original;
+    }, 1200);
+    return (): void => {
+      window.clearInterval(id);
+      document.title = original;
+    };
+  }, [peerJoinedAlert]);
 
   React.useEffect(() => {
     if (!session || !hasKey) return;
@@ -200,6 +239,16 @@ export function ChatPage(): React.ReactElement {
           members => {
             if (closed || epoch !== chatEpochRef.current) return;
             setPresenceMembers(members);
+            const localId = localClientIdRef.current;
+            const others = localId
+              ? members.filter(m => m.clientId !== localId)
+              : members.filter(m => !isSelfMessage(m.name, sessionNameRef.current));
+            const hasOther = others.length > 0;
+            if (hasOther && !hadOtherInRoomRef.current) {
+              setPeerJoinedAlert(true);
+              startPeerJoinedAlertLoop();
+            }
+            hadOtherInRoomRef.current = hasOther;
           }
         );
         if (closed || epoch !== chatEpochRef.current) {
@@ -207,6 +256,7 @@ export function ChatPage(): React.ReactElement {
           return;
         }
         setLocalClientId(chat.localClientId);
+        localClientIdRef.current = chat.localClientId;
         setPresenceEnabled(chat.presenceEnabled);
         setChannelName(chat.channelName);
         setConnectionId(chat.connectionId);
@@ -239,6 +289,10 @@ export function ChatPage(): React.ReactElement {
       publishRef.current = null;
       typingPublishRef.current = null;
       setPublishReady(false);
+      stopPeerJoinedAlertLoop();
+      setPeerJoinedAlert(false);
+      hadOtherInRoomRef.current = false;
+      localClientIdRef.current = null;
       closeSession?.();
     };
   }, [ablyKey, hasKey, session, relayInbound, flushLocalTyping]);
@@ -499,8 +553,41 @@ export function ChatPage(): React.ReactElement {
   const voiceHref = `/voice?room=${encodeURIComponent(session.room)}`;
 
   return (
-    <div className="peer-chat-page peer-chat-page--session">
+    <div className="peer-chat-page peer-chat-page--session" onPointerDownCapture={() => unlockSoftAudio()}>
       {destroying ? <ConversationDestroyOverlay onComplete={finishLeave} /> : null}
+      {peerJoinedAlert ? (
+        <div className="peer-joined-alert" role="alertdialog" aria-live="assertive">
+          <div>
+            <strong>Someone joined your support room</strong>
+            <p style={{ margin: '6px 0 0', fontSize: 14 }}>
+              A peer supporter is here. Soft alert sound continues until you clear this notice.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                unlockSoftAudio();
+                testAlertSound();
+              }}
+            >
+              Test sound
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setPeerJoinedAlert(false);
+                stopPeerJoinedAlertLoop();
+                unlockSoftAudio();
+              }}
+            >
+              Clear notice &amp; stop sound
+            </button>
+          </div>
+        </div>
+      ) : null}
       <header className="peer-chat-toolbar">
         <div className="peer-chat-toolbar__left">
           <h2 className="peer-chat-toolbar__title">Room {session.room}</h2>

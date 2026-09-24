@@ -25,6 +25,10 @@ export function ModernMore(): React.ReactElement {
             Use classic UI
           </button>
         </div>
+        <Link to="/m/resources#coloring">
+          <b>Coloring Therapy</b>
+          <span>Adult pages you can color here or print</span>
+        </Link>
         <Link to="/m/staff">
           <b>Staff sign-in</b>
           <span>View and respond to support requests</span>

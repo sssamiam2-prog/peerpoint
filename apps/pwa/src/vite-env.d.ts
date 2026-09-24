@@ -20,4 +20,6 @@ interface ImportMetaEnv {
    * Example: `[{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]`
    */
   readonly VITE_WEBRTC_ICE_JSON?: string;
+  /** Hide member UI; staff workspace shows Peer Support Event Logger only (admin unchanged). */
+  readonly VITE_PEERPOINT_EVENT_LOGGER_PHASE?: string;
 }

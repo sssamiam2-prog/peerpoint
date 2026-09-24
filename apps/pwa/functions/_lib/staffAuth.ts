@@ -20,10 +20,19 @@ const MIN_PASSWORD_LENGTH = 8;
 export const SEED_ADMIN_USERNAME = 'admin';
 export const SEED_ADMIN_PASSWORD = 'PeersStandWithYou2026!';
 
+/** Global admin (master control; not used for On Call / peer matching). Login: Admn (stored as admn). */
+export const SEED_GLOBAL_ADMIN_USERNAME = 'admn';
+export const SEED_GLOBAL_ADMIN_PASSWORD = 'thisispeersupport';
+
+const MASTER_ADMIN_USERNAMES = new Set([SEED_ADMIN_USERNAME, SEED_GLOBAL_ADMIN_USERNAME]);
+
 export type StaffRole = 'admin' | 'staff';
 
 /** Used for member preference matching on immediate contact. */
 export type StaffSex = 'male' | 'female';
+
+/** Peer’s agency employment class for member matching. */
+export type EmploymentClassification = 'civilian' | 'sworn';
 
 export type StaffUser = {
   username: string;
@@ -35,6 +44,8 @@ export type StaffUser = {
   email: string;
   /** Peer sex for matching member Male/Female preferences. */
   sex?: StaffSex;
+  /** Civilian vs sworn — used when member asks for that peer type. */
+  employmentClassification?: EmploymentClassification;
   personalEmail?: string;
   workEmail?: string;
   currentShift?: string;
@@ -54,6 +65,11 @@ export type StaffUser = {
   setupComplete: boolean;
   createdAt: string;
   invitedBy?: string;
+  /**
+   * When true, next successful login must change password before using staff tools.
+   * Set on provision / admin temporary password; cleared after change-password or self-serve reset.
+   */
+  mustChangePassword?: boolean;
   /** Peer Support Leader — notified when on-call cannot take a request. */
   isPeerSupportLeader?: boolean;
   /**
@@ -69,9 +85,7 @@ export type StaffUser = {
 
 /** Master control account — not used for On Call matching or peer support work. */
 export function isSeedAdminUsername(username: string | undefined | null): boolean {
-  return String(username ?? '')
-    .trim()
-    .toLowerCase() === SEED_ADMIN_USERNAME;
+  return MASTER_ADMIN_USERNAMES.has(normalizeUsername(String(username ?? '')));
 }
 
 /** Active Peer Support Members who can take On Call / immediate contact (excludes seed Admin). */
@@ -111,11 +125,13 @@ export type PublicStaffAccount = {
   jobTitle: string;
   email: string;
   sex?: StaffSex;
+  employmentClassification?: EmploymentClassification;
   displayName?: string;
   active: boolean;
   setupComplete: boolean;
   createdAt: string;
   isPeerSupportLeader?: boolean;
+  mustChangePassword?: boolean;
   /** True when cell is on Twilio Verified Caller ID list (needed for trial SMS). */
   twilioPhoneVerified?: boolean;
   emailVerified?: boolean;
@@ -225,6 +241,10 @@ export function validateEmail(email: string): string | null {
 
 export function validateUsername(username: string): string | null {
   if (!username) return 'Username is required.';
+  // Staff login identity is typically email.
+  if (username.includes('@')) {
+    return validateEmail(username);
+  }
   if (username.length < 2 || username.length > 64) return 'Username must be 2–64 characters.';
   if (!/^[a-z0-9._-]+$/.test(username)) {
     return 'Username may only use letters, numbers, dots, underscores, and hyphens.';
@@ -323,20 +343,25 @@ export async function saveUsers(env: Env, users: StaffUser[]): Promise<void> {
   memoryUsers = users;
 }
 
-/** Idempotent: ensure seed Admin user exists with known password. */
-export async function ensureSeedAdmin(env: Env): Promise<void> {
+async function ensureMasterAdminAccount(
+  env: Env,
+  username: string,
+  password: string,
+  profile: Pick<StaffUser, 'firstName' | 'lastName' | 'bureau' | 'jobTitle' | 'email' | 'displayName'>
+): Promise<void> {
+  const normalized = normalizeUsername(username);
   const users = await loadUsers(env);
-  if (users.some(u => u.username === SEED_ADMIN_USERNAME)) return;
-  const { hash, salt } = await hashPassword(SEED_ADMIN_PASSWORD);
+  if (users.some(u => u.username === normalized)) return;
+  const { hash, salt } = await hashPassword(password);
   users.push({
-    username: SEED_ADMIN_USERNAME,
+    username: normalized,
     role: 'admin',
-    firstName: 'Admin',
-    lastName: '',
-    bureau: 'PEER Support',
-    jobTitle: 'Administrator',
-    email: 'admin@mypeerpoint.com',
-    displayName: 'Admin',
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    bureau: profile.bureau,
+    jobTitle: profile.jobTitle,
+    email: profile.email,
+    displayName: profile.displayName,
     passwordHash: hash,
     salt,
     active: true,
@@ -345,6 +370,26 @@ export async function ensureSeedAdmin(env: Env): Promise<void> {
     createdAt: new Date().toISOString()
   });
   await saveUsers(env, users);
+}
+
+/** Idempotent: ensure built-in Admin accounts exist with known passwords. */
+export async function ensureSeedAdmin(env: Env): Promise<void> {
+  await ensureMasterAdminAccount(env, SEED_ADMIN_USERNAME, SEED_ADMIN_PASSWORD, {
+    firstName: 'Admin',
+    lastName: '',
+    bureau: 'PEER Support',
+    jobTitle: 'Administrator',
+    email: 'admin@mypeerpoint.com',
+    displayName: 'Admin'
+  });
+  await ensureMasterAdminAccount(env, SEED_GLOBAL_ADMIN_USERNAME, SEED_GLOBAL_ADMIN_PASSWORD, {
+    firstName: 'Global',
+    lastName: 'Admin',
+    bureau: 'PEER Support',
+    jobTitle: 'Global Administrator',
+    email: 'admn@mypeerpoint.com',
+    displayName: 'Global Admin'
+  });
 }
 
 export function toPublicAccount(u: StaffUser): PublicStaffAccount {
@@ -358,11 +403,16 @@ export function toPublicAccount(u: StaffUser): PublicStaffAccount {
     jobTitle: u.jobTitle,
     email: u.email,
     sex: u.sex === 'male' || u.sex === 'female' ? u.sex : undefined,
+    employmentClassification:
+      u.employmentClassification === 'civilian' || u.employmentClassification === 'sworn'
+        ? u.employmentClassification
+        : undefined,
     displayName: displayNameFor(u),
     active: u.active,
     setupComplete: u.setupComplete,
     createdAt: u.createdAt,
     isPeerSupportLeader: u.isPeerSupportLeader === true,
+    mustChangePassword: u.mustChangePassword === true,
     twilioPhoneVerified: Boolean(cellE164),
     emailVerified: Boolean(u.emailVerifiedAt),
     cellPhone: (u.cellPhone ?? '').trim() || undefined
