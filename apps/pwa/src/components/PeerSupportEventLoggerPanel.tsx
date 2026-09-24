@@ -206,7 +206,7 @@ export function PeerSupportEventLoggerPanel(props: {
         </button>
       </form>
 
-      <h4 style={{ marginTop: 32, fontSize: 1.125rem }}>Your recent entries (last 5 days)</h4>
+      <h4 style={{ marginTop: 32, fontSize: '1.125rem' }}>Your recent entries (last 5 days)</h4>
       {recent.length === 0 ? (
         <p style={{ fontSize: 15, color: 'var(--text)' }}>No events logged yet.</p>
       ) : (
