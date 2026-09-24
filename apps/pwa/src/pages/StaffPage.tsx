@@ -531,14 +531,8 @@ export function StaffPage(): React.ReactElement {
         setError(data.error ?? 'Login failed.');
         return;
       }
-      const expectedMode = onProdAdminHost ? 'admin' : loginMode;
-      if (expectedMode === 'admin' && data.role !== 'admin') {
-        setError('That account is Staff. Switch to Staff sign-in.');
-        return;
-      }
-      if (expectedMode === 'staff' && data.role === 'admin') {
-        setError('That account is Admin. Switch to Admin sign-in.');
-        return;
+      if (!onProdAdminHost) {
+        setLoginMode(data.role);
       }
       const nextMeta: SessionMeta = {
         role: data.role,
@@ -1346,7 +1340,7 @@ export function StaffPage(): React.ReactElement {
             ? `Enter your Admin username or email and password. Production Admin URL: https://${ADMIN_HOST}`
             : mode === 'admin'
               ? 'Sign in with your Admin email (or username) and password. Works in this installed app on Windows, Mac, or phone.'
-              : 'For Peer Support staff and on-duty peers. Sign in with your work email and temporary password (lowercase first initial + last name + 1234, e.g. ssmith1234), then choose a new password.'}
+              : 'For Peer Support staff and on-duty peers. Sign in with your work email and temporary password (lowercase first initial + last name + 1234, e.g. ssmith1234), then choose a new password. Global Admin accounts (e.g. Admn) work from either tab.'}
         </p>
 
         {!onProdAdminHost ? (
