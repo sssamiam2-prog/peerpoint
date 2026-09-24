@@ -109,8 +109,8 @@ export function PeerSupportEventLoggerPanel(props: {
     <section className="staff-tab-panel" role="tabpanel" id="panel-peerEvents" aria-labelledby="tab-peerEvents">
       <h3 style={{ marginTop: 0 }}>Peer Support Event Logger</h3>
       <p style={{ fontSize: 14, color: 'var(--text)', maxWidth: 640 }}>
-        Record a peer support interaction for reporting. Data syncs to SharePoint through an admin-only refresh flow
-        on the SH-PS site.
+        Record a peer support interaction for reporting. Your recent entries stay here for <strong>5 days</strong>,
+        then drop from the app after they are synced to the SharePoint list on SH-PS.
       </p>
 
       {loading ? <p style={{ fontSize: 14 }}>Loading…</p> : null}
@@ -185,7 +185,7 @@ export function PeerSupportEventLoggerPanel(props: {
         </button>
       </form>
 
-      <h4 style={{ marginTop: 28 }}>Your recent entries</h4>
+      <h4 style={{ marginTop: 28 }}>Your recent entries (last 5 days)</h4>
       {recent.length === 0 ? (
         <p style={{ fontSize: 14, color: 'var(--text)' }}>No events logged yet.</p>
       ) : (

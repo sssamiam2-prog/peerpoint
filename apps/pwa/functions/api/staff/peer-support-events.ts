@@ -2,8 +2,9 @@ import { loadUsers, requireStaffOrAdmin } from '../../_lib/staffAuth';
 import {
   clampEventMinutes,
   corsHeaders,
+  filterPeerSupportEventsForStaffApp,
   json,
-  loadPeerSupportEvents,
+  loadAndMaintainPeerSupportEvents,
   loadPeerSupportHelpTypes,
   newId,
   normalizePrpsGender,
@@ -24,17 +25,10 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
   const auth = await requireStaffOrAdmin(request, env);
   if ('error' in auth) return json({ error: auth.error }, auth.status, origin);
 
-  const url = new URL(request.url);
-  const store = await loadPeerSupportEvents(env);
-  let events = [...store.events].sort((a, b) => Date.parse(b.recordedAt) - Date.parse(a.recordedAt));
-
-  const since = url.searchParams.get('since')?.trim();
-  if (since) {
-    const t = Date.parse(since);
-    if (Number.isFinite(t)) {
-      events = events.filter(e => Date.parse(e.recordedAt) >= t);
-    }
-  }
+  const store = await loadAndMaintainPeerSupportEvents(env);
+  let events = filterPeerSupportEventsForStaffApp(store.events, auth.session).sort(
+    (a, b) => Date.parse(b.recordedAt) - Date.parse(a.recordedAt)
+  );
 
   const limitRaw = url.searchParams.get('limit');
   const limit = limitRaw ? Math.min(Math.max(Number(limitRaw), 1), 500) : 100;
@@ -50,7 +44,16 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
     }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-  return json({ events, helpTypes, providers }, 200, origin);
+  return json(
+    {
+      events,
+      helpTypes,
+      providers,
+      retentionDays: 5
+    },
+    200,
+    origin
+  );
 }
 
 export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
@@ -105,7 +108,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     createdByDisplay: auth.session.displayName || auth.session.username
   };
 
-  const store = await loadPeerSupportEvents(env);
+  const store = await loadAndMaintainPeerSupportEvents(env);
   store.events.unshift(event);
   await savePeerSupportEvents(env, store);
 

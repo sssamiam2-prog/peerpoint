@@ -578,6 +578,9 @@ export type PeerSupportEventStore = {
   events: PeerSupportEvent[];
 };
 
+/** How long staff see logged events in the app (SharePoint is the long-term record). */
+export const PEER_SUPPORT_EVENT_APP_RETENTION_MS = 5 * 24 * 60 * 60 * 1000;
+
 let memoryPeerSupportEvents: PeerSupportEventStore = { events: [] };
 let memoryHelpTypes: string[] = [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
 
@@ -647,6 +650,67 @@ export async function savePeerSupportEvents(env: Env, store: PeerSupportEventSto
     return;
   }
   memoryPeerSupportEvents = store;
+}
+
+export function peerSupportEventRecordedMs(e: PeerSupportEvent): number {
+  const t = Date.parse(e.recordedAt);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Drop events older than 5 days once SharePoint sync marked them imported. */
+export function purgePeerSupportEventsSyncedAndExpired(
+  store: PeerSupportEventStore,
+  now = Date.now()
+): { store: PeerSupportEventStore; removed: number } {
+  const cutoff = now - PEER_SUPPORT_EVENT_APP_RETENTION_MS;
+  const before = store.events.length;
+  const events = store.events.filter(e => {
+    const recorded = peerSupportEventRecordedMs(e);
+    if (recorded >= cutoff) return true;
+    if (!e.sharePointImportedAt?.trim()) return true;
+    return false;
+  });
+  return { store: { events }, removed: before - events.length };
+}
+
+export function markPeerSupportEventsImported(
+  store: PeerSupportEventStore,
+  ids: string[],
+  importedAt = new Date().toISOString()
+): number {
+  const idSet = new Set(ids.map(id => id.trim()).filter(Boolean));
+  let marked = 0;
+  const events = store.events.map(e => {
+    if (!idSet.has(e.id) || e.sharePointImportedAt) return e;
+    marked += 1;
+    return { ...e, sharePointImportedAt: importedAt };
+  });
+  store.events = events;
+  return marked;
+}
+
+/** Staff app list: last 5 days; staff see rows they logged or where they are the provider. */
+export function filterPeerSupportEventsForStaffApp(
+  events: PeerSupportEvent[],
+  session: { username: string; role: 'admin' | 'staff' },
+  now = Date.now()
+): PeerSupportEvent[] {
+  const cutoff = now - PEER_SUPPORT_EVENT_APP_RETENTION_MS;
+  const me = session.username.trim().toLowerCase();
+  return events.filter(e => {
+    if (peerSupportEventRecordedMs(e) < cutoff) return false;
+    if (session.role === 'admin') return true;
+    return (
+      e.createdBy.trim().toLowerCase() === me || e.providerUsername.trim().toLowerCase() === me
+    );
+  });
+}
+
+export async function loadAndMaintainPeerSupportEvents(env: Env): Promise<PeerSupportEventStore> {
+  const store = await loadPeerSupportEvents(env);
+  const { store: next, removed } = purgePeerSupportEventsSyncedAndExpired(store);
+  if (removed > 0) await savePeerSupportEvents(env, next);
+  return next;
 }
 
 export function integrationSecret(env: Env): string {

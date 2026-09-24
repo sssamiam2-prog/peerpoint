@@ -28,12 +28,23 @@ Response: `{ exportedAt, count, events: [{ id, eventDate, prpsBureau, prpsGender
 
 Map `id` → list column **PeerPoint Event Id** (use as upsert key in the flow).
 
+## App retention (5 days)
+
+- Staff see only their own events from the **last 5 days** in the Event Logger.
+- After an event is in SharePoint, Power Automate should **POST** the same integration URL with:
+
+  `{ "importedIds": ["<PeerPoint Event Id>", ...] }`
+
+  That marks rows imported and **removes** them from PEERPoint when they are older than 5 days.
+- Events **not** yet marked imported are kept in KV so sync can retry (even past 5 days).
+
 ## Power Automate (outline)
 
 1. **Manual trigger** — button on a SharePoint page (“Refresh PeerPoint”), run only as site owner.
 2. **HTTP** — GET integration URL with Bearer secret.
 3. **Parse JSON** — `events` array.
 4. **Apply to each** — **Get items** on PeerSupportEvents where `PeerPointEventId` eq `id`; if none, **Create item**, else **Update item**.
+5. **HTTP POST** (same Bearer secret) — body `{ "importedIds": [ ... ids synced this run ... ] }` to mark imported and purge aged rows from the app.
 
 ## Admin: types of help
 

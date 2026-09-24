@@ -3,7 +3,10 @@ import {
   integrationAuthorized,
   integrationSecret,
   json,
-  loadPeerSupportEvents,
+  loadAndMaintainPeerSupportEvents,
+  markPeerSupportEventsImported,
+  purgePeerSupportEventsSyncedAndExpired,
+  savePeerSupportEvents,
   type Env,
   type PeerSupportEvent
 } from '../../_lib/store';
@@ -47,7 +50,7 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
   }
 
   const url = new URL(request.url);
-  const store = await loadPeerSupportEvents(env);
+  const store = await loadAndMaintainPeerSupportEvents(env);
   let events = [...store.events].sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
 
   const since = url.searchParams.get('since')?.trim();
@@ -73,6 +76,51 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
       exportedAt: new Date().toISOString(),
       count: events.length,
       events: events.map(exportRow)
+    },
+    200,
+    origin
+  );
+}
+
+/**
+ * POST /api/integrations/peer-support-events
+ * Body: { "importedIds": ["uuid", ...] } — call after rows are in SharePoint.
+ * Marks imported, then purges app copies older than 5 days that are marked imported.
+ */
+export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
+  const origin = request.headers.get('Origin');
+  if (!integrationSecret(env)) {
+    return json({ error: 'PEERPOINT_INTEGRATION_SECRET is not configured.' }, 503, origin);
+  }
+  if (!integrationAuthorized(request, env)) {
+    return json({ error: 'Unauthorized.' }, 401, origin);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return json({ error: 'Invalid JSON body.' }, 400, origin);
+  }
+
+  const rawIds = body.importedIds ?? body.ids ?? body.eventIds;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    return json({ error: 'importedIds array is required.' }, 400, origin);
+  }
+  const ids = rawIds.map(v => String(v ?? '').trim()).filter(Boolean);
+  if (ids.length === 0) return json({ error: 'importedIds array is required.' }, 400, origin);
+
+  const store = await loadAndMaintainPeerSupportEvents(env);
+  const marked = markPeerSupportEventsImported(store, ids);
+  const { store: purged, removed } = purgePeerSupportEventsSyncedAndExpired(store);
+  await savePeerSupportEvents(env, purged);
+
+  return json(
+    {
+      ok: true,
+      marked,
+      purgedAfterSharePoint: removed,
+      at: new Date().toISOString()
     },
     200,
     origin
