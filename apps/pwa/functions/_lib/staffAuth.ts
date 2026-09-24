@@ -11,6 +11,7 @@ const RESET_PREFIX = 'peerpoint:pwreset:';
 const EMAIL_VERIFY_PREFIX = 'peerpoint:emailverify:';
 const SESSION_PREFIX = 'peerpoint:session:';
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
+export const REMEMBER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const RESET_TTL_SECONDS = 60 * 60;
 const EMAIL_VERIFY_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -702,14 +703,16 @@ function sessionKey(token: string): string {
 
 export async function createSession(
   env: Env,
-  session: Omit<StaffSession, 'exp'>
+  session: Omit<StaffSession, 'exp'>,
+  options?: { remember?: boolean }
 ): Promise<{ token: string; session: StaffSession }> {
-  const exp = Date.now() + SESSION_TTL_SECONDS * 1000;
+  const ttlSeconds = options?.remember ? REMEMBER_SESSION_TTL_SECONDS : SESSION_TTL_SECONDS;
+  const exp = Date.now() + ttlSeconds * 1000;
   const full: StaffSession = { ...session, exp };
   const token = newOpaqueToken();
   if (env.PEERPOINT_KV) {
     await env.PEERPOINT_KV.put(sessionKey(token), JSON.stringify(full), {
-      expirationTtl: SESSION_TTL_SECONDS
+      expirationTtl: ttlSeconds
     });
   } else {
     memorySessions.set(token, full);

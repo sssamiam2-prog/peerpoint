@@ -38,7 +38,9 @@ export function ModernStaffRequests(): React.ReactElement {
   const [alertIds, setAlertIds] = React.useState<string[]>([]);
   const [cleared, setCleared] = React.useState<Set<string>>(() => new Set());
   const prevOffered = React.useRef<Set<string>>(new Set());
-  const token = sessionStorage.getItem('peerpoint_staff_token');
+  const token =
+    (typeof localStorage !== 'undefined' && localStorage.getItem('peerpoint_staff_token')) ||
+    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('peerpoint_staff_token'));
   const me = loadStaffUsername();
 
   const load = React.useCallback(async (): Promise<void> => {

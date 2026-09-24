@@ -43,7 +43,9 @@ export function ModernSessionChat({ staff = false, requestId, supportCode }: Pro
     () => staff || (id ? hasAcknowledgedConfidentiality(confidentialitySessionKey('request', id)) : false)
   );
   const [showNotice, setShowNotice] = React.useState(() => !staff && Boolean(id) && !noticeReady);
-  const staffToken = staff ? sessionStorage.getItem('peerpoint_staff_token') ?? undefined : undefined;
+  const staffToken = staff
+    ? localStorage.getItem('peerpoint_staff_token') || sessionStorage.getItem('peerpoint_staff_token') || undefined
+    : undefined;
   const selfName = staff ? 'Peer Support Staff' : 'You';
   const hadOtherRef = React.useRef(false);
   const localClientIdRef = React.useRef<string | null>(null);

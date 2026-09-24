@@ -1,7 +1,7 @@
 {
   "name": "@slco-peer-support/pwa",
   "private": true,
-  "version": "1.2.60",
+  "version": "1.2.61",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,6 +15,8 @@
     "docs:admin-howto": "python scripts/generate-howtos.py"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.2",
     "ably": "^2.21.0",
     "livekit-client": "^2.21.0",
     "react": "^19.2.5",

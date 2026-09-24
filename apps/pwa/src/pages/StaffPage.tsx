@@ -18,9 +18,20 @@ import {
   testAlertSound,
   unlockSoftAudio
 } from '../lib/softSounds';
-
-const STAFF_TOKEN_KEY = 'peerpoint_staff_token';
-const STAFF_META_KEY = 'peerpoint_staff_meta';
+import { loginWithStaffPasskey, registerStaffPasskey } from '../lib/staffPasskey';
+import {
+  clearStaffSession,
+  defaultRememberMe,
+  passkeyHintForUsername,
+  patchStaffMeta,
+  readLastUsername,
+  readRememberPreference,
+  readStaffMeta,
+  readStaffToken,
+  setPasskeyHint,
+  webAuthnSupported,
+  writeStaffSession
+} from '../lib/staffSessionStorage';
 
 function isMasterAdminUsername(username: string): boolean {
   const u = username.trim().toLowerCase();
@@ -172,16 +183,6 @@ type RosterPerson = {
   sex?: 'male' | 'female';
 };
 
-function loadMeta(): SessionMeta | null {
-  try {
-    const raw = sessionStorage.getItem(STAFF_META_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as SessionMeta;
-  } catch {
-    return null;
-  }
-}
-
 function localDayString(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -233,20 +234,18 @@ export function StaffPage(): React.ReactElement {
   const onAdminHost = isAdminHostClient();
   const onProdAdminHost = isProductionAdminHost();
 
-  const [username, setUsername] = React.useState('');
+  const [username, setUsername] = React.useState(() => readLastUsername());
   const [password, setPassword] = React.useState('');
+  const [rememberMe, setRememberMe] = React.useState(() => readRememberPreference() ?? defaultRememberMe());
+  const [passkeyBusy, setPasskeyBusy] = React.useState(false);
+  const [passkeyMsg, setPasskeyMsg] = React.useState<string | undefined>();
+  const [passkeyCount, setPasskeyCount] = React.useState(0);
   /** On the member/installable app: Staff sign-in with nested Admin sign-in. */
   const [loginMode, setLoginMode] = React.useState<StaffRole>(() =>
     isProductionAdminHost() ? 'admin' : 'staff'
   );
-  const [token, setToken] = React.useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem(STAFF_TOKEN_KEY);
-    } catch {
-      return null;
-    }
-  });
-  const [meta, setMeta] = React.useState<SessionMeta | null>(() => loadMeta());
+  const [token, setToken] = React.useState<string | null>(() => readStaffToken());
+  const [meta, setMeta] = React.useState<SessionMeta | null>(() => readStaffMeta());
   const [error, setError] = React.useState<string | undefined>();
   const [info, setInfo] = React.useState<string | undefined>();
   const [requests, setRequests] = React.useState<HelpRequest[]>([]);
@@ -316,17 +315,15 @@ export function StaffPage(): React.ReactElement {
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   }, [token]);
 
-  const persistSession = (nextToken: string, nextMeta: SessionMeta): void => {
-    sessionStorage.setItem(STAFF_TOKEN_KEY, nextToken);
-    sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(nextMeta));
+  const persistSession = (nextToken: string, nextMeta: SessionMeta, remember = rememberMe): void => {
+    writeStaffSession(nextToken, nextMeta, remember);
     setToken(nextToken);
     setMeta(nextMeta);
   };
 
   const clearSession = (): void => {
     stopAllSoftAlerts();
-    sessionStorage.removeItem(STAFF_TOKEN_KEY);
-    sessionStorage.removeItem(STAFF_META_KEY);
+    clearStaffSession(false);
     setToken(null);
     setMeta(null);
     setRequests([]);
@@ -377,7 +374,7 @@ export function StaffPage(): React.ReactElement {
     setRoster(data.roster ?? []);
     if (data.me) {
       setMeta(data.me);
-      sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(data.me));
+      patchStaffMeta(data.me);
       if (data.me.displayName && !peerName) setPeerName(data.me.displayName);
       if (!onCallUsername && data.me.username) {
         const meOnRoster = (data.roster ?? []).some(p => p.username === data.me!.username);
@@ -418,6 +415,39 @@ export function StaffPage(): React.ReactElement {
   );
 
   const eventLoggerPhaseActive = isEventLoggerPhaseOnly();
+
+  React.useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void (async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/staff/session', { headers: authHeaders() });
+        const data = (await res.json().catch(() => ({}))) as {
+          me?: SessionMeta;
+          passkeyCount?: number;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          clearSession();
+          return;
+        }
+        if (data.me) {
+          setMeta(data.me);
+          patchStaffMeta(data.me);
+          if (data.me.displayName && !peerName) setPeerName(data.me.displayName);
+        }
+        if (typeof data.passkeyCount === 'number') setPasskeyCount(data.passkeyCount);
+      } catch {
+        if (!cancelled) clearSession();
+      }
+    })();
+    return (): void => {
+      cancelled = true;
+    };
+    // Validate stored session once when token is restored from storage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount/restore check
+  }, []);
 
   React.useEffect(() => {
     if (token) {
@@ -539,7 +569,8 @@ export function StaffPage(): React.ReactElement {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: username.trim(),
-          password
+          password,
+          rememberMe
         })
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -563,12 +594,59 @@ export function StaffPage(): React.ReactElement {
         displayName: data.displayName,
         mustChangePassword: data.mustChangePassword === true
       };
-      persistSession(data.token, nextMeta);
+      persistSession(data.token, nextMeta, rememberMe);
       setPassword('');
-      setUsername('');
       if (nextMeta.displayName) setPeerName(nextMeta.displayName);
     } catch {
       setError('Staff API not reachable. Deploy Pages Functions and configure secrets + KV.');
+    }
+  };
+
+  const onPasskeyLogin = async (): Promise<void> => {
+    setError(undefined);
+    setPasskeyMsg(undefined);
+    if (!webAuthnSupported()) {
+      setError('Biometric sign-in needs a secure connection (HTTPS) and a supported browser or installed app.');
+      return;
+    }
+    setPasskeyBusy(true);
+    try {
+      const result = await loginWithStaffPasskey(username.trim() || readLastUsername(), rememberMe);
+      if (!result.ok) {
+        setError('error' in result ? result.error : 'Biometric sign-in failed.');
+        return;
+      }
+      if (!onProdAdminHost) setLoginMode(result.meta.role);
+      persistSession(result.data.token, result.meta, rememberMe);
+      setPassword('');
+      if (result.meta.displayName) setPeerName(result.meta.displayName);
+      setPasskeyHint(result.meta.username ?? username, true);
+      setPasskeyCount(c => Math.max(c, 1));
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
+
+  const onEnablePasskey = async (): Promise<void> => {
+    setPasskeyMsg(undefined);
+    setError(undefined);
+    if (!token) return;
+    if (!webAuthnSupported()) {
+      setPasskeyMsg('Biometric sign-in is not available in this browser.');
+      return;
+    }
+    setPasskeyBusy(true);
+    try {
+      const result = await registerStaffPasskey(token);
+      if ('error' in result) {
+        setPasskeyMsg(result.error);
+        return;
+      }
+      setPasskeyCount(c => c + 1);
+      if (meta?.username) setPasskeyHint(meta.username, true);
+      setPasskeyMsg('Biometric sign-in enabled on this device.');
+    } finally {
+      setPasskeyBusy(false);
     }
   };
 
@@ -603,7 +681,7 @@ export function StaffPage(): React.ReactElement {
       if (meta) {
         const next = { ...meta, mustChangePassword: false };
         setMeta(next);
-        sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(next));
+        patchStaffMeta(next);
       }
       return { title: 'Password updated', message: 'Your password has been changed.' };
     }, toast => toast ?? undefined);
@@ -1363,7 +1441,7 @@ export function StaffPage(): React.ReactElement {
             unavailableReason: data.me.unavailableReason
           };
           setMeta(next);
-          sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(next));
+          patchStaffMeta(next);
         }
         // Verify server echo matches the requested change.
         if (nowAvailable !== available) {
@@ -1460,9 +1538,29 @@ export function StaffPage(): React.ReactElement {
             name="password"
           />
         </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, fontSize: 14 }}>
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={e => setRememberMe(e.target.checked)}
+          />
+          Stay signed in on this device (uses secure browser storage)
+        </label>
         <button type="button" style={{ marginTop: 12 }} onClick={() => void onLogin()}>
           {mode === 'admin' ? 'Sign in as Admin' : 'Sign in as Staff'}
         </button>
+        {webAuthnSupported() &&
+        (passkeyHintForUsername(username) || passkeyHintForUsername(readLastUsername())) ? (
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ marginTop: 10, width: '100%' }}
+            disabled={passkeyBusy}
+            onClick={() => void onPasskeyLogin()}
+          >
+            {passkeyBusy ? 'Opening biometric sign-in…' : 'Sign in with Face ID / fingerprint / Windows Hello'}
+          </button>
+        ) : null}
         <p style={{ marginTop: 12, fontSize: 14 }}>
           <button
             type="button"
@@ -3038,6 +3136,33 @@ export function StaffPage(): React.ReactElement {
               onPhoneChange={setAccountCellPhone}
             />
           </div>
+
+          <h3 style={{ marginTop: 28 }}>Biometric sign-in</h3>
+          <p style={{ fontSize: 14, color: 'var(--text)', marginTop: 0 }}>
+            Use Face ID, fingerprint, or Windows Hello on this device after you enable it once while signed in with
+            your password.
+          </p>
+          {passkeyMsg ? <p style={{ color: 'var(--accent, #0f6a4a)' }}>{passkeyMsg}</p> : null}
+          {meta?.mustChangePassword ? (
+            <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Change your temporary password first.</p>
+          ) : webAuthnSupported() ? (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={passkeyBusy || !token}
+              onClick={() => void onEnablePasskey()}
+            >
+              {passkeyBusy
+                ? 'Waiting for your device…'
+                : passkeyCount > 0
+                  ? 'Add another passkey on this device'
+                  : 'Enable biometric sign-in on this device'}
+            </button>
+          ) : (
+            <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+              Not available in this browser. Open the installed PEERPoint app or use Chrome/Edge/Safari over HTTPS.
+            </p>
+          )}
 
           <h3 style={{ marginTop: 28 }}>Change password</h3>
           {passwordMsg ? <p style={{ color: 'var(--accent, #0f6a4a)' }}>{passwordMsg}</p> : null}

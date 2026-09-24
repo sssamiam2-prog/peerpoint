@@ -1,4 +1,4 @@
-import { corsHeaders, json, type Env } from '../../_lib/store';
+import { corsHeaders, json, type Env } from '../../../_lib/store';
 import {
   createSession,
   displayNameFor,
@@ -6,8 +6,9 @@ import {
   findUserByUsernameOrEmail,
   isProductionAdminHost,
   loadUsers,
-  verifyPassword
-} from '../../_lib/staffAuth';
+  normalizeUsername
+} from '../../../_lib/staffAuth';
+import { verifyAuthentication } from '../../../_lib/webauthn';
 
 type Ctx = { request: Request; env: Env };
 
@@ -15,65 +16,48 @@ export async function onRequestOptions({ request }: Ctx): Promise<Response> {
   return new Response(null, { status: 204, headers: corsHeaders(request.headers.get('Origin')) });
 }
 
-/**
- * POST /api/staff/login
- * Body: `{ username, password }` — `username` may be username or email on file.
- * - Admin host (production): only Admin-role accounts
- * - Main host: Staff or Admin
- */
+/** POST /api/staff/webauthn/login-verify — finish biometric sign-in and issue session. */
 export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   const origin = request.headers.get('Origin');
-  let body: { username?: string; password?: string; usernameOrEmail?: string; rememberMe?: boolean };
+  let body: { username?: string; usernameOrEmail?: string; response?: unknown; rememberMe?: boolean };
   try {
     body = (await request.json()) as {
       username?: string;
-      password?: string;
       usernameOrEmail?: string;
+      response?: unknown;
       rememberMe?: boolean;
     };
   } catch {
     return json({ error: 'Invalid JSON.' }, 400, origin);
   }
 
-  const password = (body.password ?? '').trim();
   const identity = (body.usernameOrEmail ?? body.username ?? '').trim();
   if (!identity) return json({ error: 'Username or email is required.' }, 400, origin);
-  if (!password) return json({ error: 'Password is required.' }, 400, origin);
+  if (!body.response) return json({ error: 'Missing passkey response.' }, 400, origin);
 
   if (!env.PEERPOINT_KV) {
-    return json(
-      {
-        error:
-          'PEERPOINT_KV is required for accounts. Bind a KV namespace named PEERPOINT_KV on the Pages project.'
-      },
-      503,
-      origin
-    );
+    return json({ error: 'Accounts storage is not configured.' }, 503, origin);
   }
 
   await ensureSeedAdmin(env);
   const users = await loadUsers(env);
   const user = findUserByUsernameOrEmail(users, identity);
   if (!user || !user.active || !user.setupComplete) {
-    return json({ error: 'Invalid username/email or password.' }, 401, origin);
+    return json({ error: 'Sign-in failed.' }, 401, origin);
   }
 
   if (isProductionAdminHost(request) && user.role !== 'admin') {
-    return json(
-      {
-        error:
-          'Staff sign-in is on https://mypeerpoint.com/staff. This Admin site is for Admin accounts only.'
-      },
-      403,
-      origin
-    );
+    return json({ error: 'Staff passkey sign-in is on https://mypeerpoint.com/staff.' }, 403, origin);
   }
 
-  const ok = await verifyPassword(password, user.salt, user.passwordHash);
-  if (!ok) return json({ error: 'Invalid username/email or password.' }, 401, origin);
+  const username = normalizeUsername(user.username);
+  const verification = await verifyAuthentication(request, env, username, body.response);
+  if (!verification.verified) {
+    return json({ error: 'Biometric sign-in could not be verified.' }, 401, origin);
+  }
 
-  const displayName = displayNameFor(user);
   const rememberMe = body.rememberMe !== false;
+  const displayName = displayNameFor(user);
   const { token, session } = await createSession(
     env,
     {

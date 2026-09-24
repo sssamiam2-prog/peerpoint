@@ -4,8 +4,7 @@ import { useActionFeedback, type SuccessToast } from '../components/ActionFeedba
 import { TwilioPhoneVerify } from '../components/TwilioPhoneVerify';
 import { ADMIN_HOST, isProductionAdminHost } from '../lib/adminHost';
 
-const STAFF_TOKEN_KEY = 'peerpoint_staff_token';
-const STAFF_META_KEY = 'peerpoint_staff_meta';
+import { writeStaffSession } from '../lib/staffSessionStorage';
 
 type StaffRole = 'admin' | 'staff';
 
@@ -143,8 +142,7 @@ export function SetupPage(): React.ReactElement {
           username: data.username,
           displayName: data.displayName
         };
-        sessionStorage.setItem(STAFF_TOKEN_KEY, data.token);
-        sessionStorage.setItem(STAFF_META_KEY, JSON.stringify(meta));
+        writeStaffSession(data.token, meta, true);
         // Brief success, then navigate.
         window.setTimeout(() => {
           if (data.role === 'admin' && !adminSite) {
