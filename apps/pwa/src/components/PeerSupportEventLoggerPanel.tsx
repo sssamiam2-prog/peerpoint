@@ -108,36 +108,45 @@ export function PeerSupportEventLoggerPanel(props: {
   return (
     <section className="staff-tab-panel" role="tabpanel" id="panel-peerEvents" aria-labelledby="tab-peerEvents">
       <h3 style={{ marginTop: 0 }}>Peer Support Event Logger</h3>
-      <p style={{ fontSize: 14, color: 'var(--text)', maxWidth: 640 }}>
+      <p style={{ fontSize: 15, color: 'var(--text)', maxWidth: 720, lineHeight: 1.5 }}>
         Record a peer support interaction for reporting. Your recent entries stay here for <strong>5 days</strong>,
         then drop from the app after they are synced to the SharePoint list on SH-PS.
       </p>
 
-      {loading ? <p style={{ fontSize: 14 }}>Loading…</p> : null}
-      {error ? <div style={{ color: '#a4262c', marginBottom: 8 }}>{error}</div> : null}
-      {success ? <div style={{ color: 'var(--accent, #0f6a4a)', marginBottom: 8 }}>{success}</div> : null}
+      {loading ? <p style={{ fontSize: 15 }}>Loading…</p> : null}
+      {error ? <div style={{ color: '#a4262c', marginBottom: 8, fontSize: 15 }}>{error}</div> : null}
+      {success ? <div style={{ color: 'var(--accent, #0f6a4a)', marginBottom: 8, fontSize: 15 }}>{success}</div> : null}
 
-      <form
-        onSubmit={e => void onSubmit(e)}
-        style={{ display: 'grid', gap: 12, maxWidth: 520, marginTop: 12 }}
-      >
-        <label>
+      <form className="event-logger-form" onSubmit={e => void onSubmit(e)}>
+        <label className="event-logger-form__field">
           Date of peer support
-          <input type="date" value={eventDate} onChange={ev => setEventDate(ev.target.value)} required />
-        </label>
-        <label>
-          Bureau (person receiving peer support)
           <input
+            className="event-logger-form__control"
+            type="date"
+            value={eventDate}
+            onChange={ev => setEventDate(ev.target.value)}
+            required
+          />
+        </label>
+        <label className="event-logger-form__field">
+          Bureau <span>(person receiving peer support)</span>
+          <input
+            className="event-logger-form__control"
             value={prpsBureau}
             onChange={ev => setPrpsBureau(ev.target.value)}
-            placeholder="e.g. Corrections, Patrol, Admin"
+            placeholder="e.g. Corrections, Patrol, Administration"
             required
             autoComplete="organization"
           />
         </label>
-        <label>
-          Gender (person receiving peer support)
-          <select value={prpsGender} onChange={ev => setPrpsGender(ev.target.value)} required>
+        <label className="event-logger-form__field">
+          Gender <span>(person receiving peer support)</span>
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={prpsGender}
+            onChange={ev => setPrpsGender(ev.target.value)}
+            required
+          >
             <option value="">Select…</option>
             {GENDER_OPTIONS.map(o => (
               <option key={o.value} value={o.value}>
@@ -146,9 +155,14 @@ export function PeerSupportEventLoggerPanel(props: {
             ))}
           </select>
         </label>
-        <label>
+        <label className="event-logger-form__field">
           Type of help
-          <select value={helpType} onChange={ev => setHelpType(ev.target.value)} required>
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={helpType}
+            onChange={ev => setHelpType(ev.target.value)}
+            required
+          >
             {helpTypes.map(t => (
               <option key={t} value={t}>
                 {t}
@@ -156,9 +170,14 @@ export function PeerSupportEventLoggerPanel(props: {
             ))}
           </select>
         </label>
-        <label>
+        <label className="event-logger-form__field">
           Person providing peer support
-          <select value={providerUsername} onChange={ev => setProviderUsername(ev.target.value)} required>
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={providerUsername}
+            onChange={ev => setProviderUsername(ev.target.value)}
+            required
+          >
             <option value="">Select…</option>
             {providers.map(p => (
               <option key={p.username} value={p.username}>
@@ -167,31 +186,33 @@ export function PeerSupportEventLoggerPanel(props: {
             ))}
           </select>
         </label>
-        <label>
+        <label className="event-logger-form__field">
           Total time spent (minutes)
           <input
+            className="event-logger-form__control event-logger-form__control--minutes"
             type="number"
             min={1}
             max={1440}
             step={1}
+            inputMode="numeric"
             value={totalMinutes}
             onChange={ev => setTotalMinutes(ev.target.value)}
-            placeholder="e.g. 45"
+            placeholder="45"
             required
           />
         </label>
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="event-logger-form__submit" disabled={busy}>
           {busy ? 'Saving…' : 'Save event'}
         </button>
       </form>
 
-      <h4 style={{ marginTop: 28 }}>Your recent entries (last 5 days)</h4>
+      <h4 style={{ marginTop: 32, fontSize: 1.125rem }}>Your recent entries (last 5 days)</h4>
       {recent.length === 0 ? (
-        <p style={{ fontSize: 14, color: 'var(--text)' }}>No events logged yet.</p>
+        <p style={{ fontSize: 15, color: 'var(--text)' }}>No events logged yet.</p>
       ) : (
-        <ul style={{ paddingLeft: 18, fontSize: 14, maxWidth: 720 }}>
+        <ul style={{ paddingLeft: 18, fontSize: 15, maxWidth: 720, lineHeight: 1.5 }}>
           {recent.map(ev => (
-            <li key={ev.id} style={{ marginBottom: 6 }}>
+            <li key={ev.id} style={{ marginBottom: 8 }}>
               <strong>{ev.eventDate}</strong> — {ev.helpType} · {ev.prpsBureau} · {ev.totalMinutes} min ·{' '}
               {ev.providerDisplayName}
             </li>

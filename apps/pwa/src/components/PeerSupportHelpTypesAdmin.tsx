@@ -43,7 +43,7 @@ export function PeerSupportHelpTypesAdmin(props: { authHeaders: () => HeadersIni
   }
 
   return (
-    <section style={{ marginTop: 24, maxWidth: 560 }}>
+    <section className="event-logger-help-types">
       <h4 style={{ margin: '0 0 8px' }}>Peer Support Event — types of help</h4>
       <p style={{ fontSize: 14, color: 'var(--text)', marginTop: 0 }}>
         One option per line. These appear in the staff Event Logger dropdown.

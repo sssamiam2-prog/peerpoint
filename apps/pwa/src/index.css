@@ -788,6 +788,8 @@ input[type='tel'],
 input[type='search'],
 input[type='date'],
 input[type='time'],
+input[type='number'],
+input[type='password'],
 input:not([type]),
 select,
 textarea {
@@ -813,6 +815,8 @@ input[type='tel']:focus-visible,
 input[type='search']:focus-visible,
 input[type='date']:focus-visible,
 input[type='time']:focus-visible,
+input[type='number']:focus-visible,
+input[type='password']:focus-visible,
 input:not([type]):focus-visible,
 select:focus-visible,
 textarea:focus-visible {
@@ -2257,6 +2261,109 @@ a.crisis-modal__call-btn {
 .staff-tab-panel {
   margin-top: 20px;
   text-align: left;
+}
+
+/* Peer Support Event Logger — large touch-friendly fields */
+.event-logger-form {
+  display: grid;
+  gap: 20px;
+  max-width: min(720px, 100%);
+  margin-top: 16px;
+  padding: 24px 22px 28px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #fff 0%, var(--social-bg, #f6faf7) 100%);
+  box-shadow: var(--shadow-sm, 0 4px 24px rgba(15, 45, 38, 0.06));
+}
+
+.event-logger-form__field {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #5c6b66);
+}
+
+.event-logger-form__field span {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.event-logger-form__control {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3.25rem;
+  padding: 14px 16px;
+  margin: 0;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text-h);
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  font-family: var(--sans);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.event-logger-form__control:hover:not(:disabled) {
+  border-color: rgba(15, 106, 74, 0.35);
+}
+
+.event-logger-form__control:focus-visible {
+  outline: none;
+  border-color: var(--primary, #0f6a4a);
+  box-shadow: 0 0 0 4px var(--primary-soft, rgba(15, 106, 74, 0.15));
+}
+
+.event-logger-form__control--select {
+  appearance: none;
+  padding-right: 2.75rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%235c6b66' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 1.125rem;
+  cursor: pointer;
+}
+
+.event-logger-form__control--minutes {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.event-logger-form__submit {
+  margin-top: 4px;
+  min-height: 3.25rem;
+  padding: 14px 24px !important;
+  font-size: 1.0625rem !important;
+  border-radius: 12px !important;
+  width: 100%;
+}
+
+.event-logger-help-types {
+  max-width: min(720px, 100%);
+  margin-top: 28px;
+  padding: 20px 22px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-tint);
+}
+
+.event-logger-help-types textarea {
+  min-height: 8rem;
+  padding: 14px 16px;
+  font-size: 1rem;
+  border-radius: 12px;
+  border-width: 2px;
 }
 
 .contact-log-controls {
