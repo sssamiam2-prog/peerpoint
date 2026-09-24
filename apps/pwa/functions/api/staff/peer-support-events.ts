@@ -25,6 +25,7 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
   const auth = await requireStaffOrAdmin(request, env);
   if ('error' in auth) return json({ error: auth.error }, auth.status, origin);
 
+  const url = new URL(request.url);
   const store = await loadAndMaintainPeerSupportEvents(env);
   let events = filterPeerSupportEventsForStaffApp(store.events, auth.session).sort(
     (a, b) => Date.parse(b.recordedAt) - Date.parse(a.recordedAt)

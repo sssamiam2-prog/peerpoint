@@ -700,9 +700,9 @@ export function filterPeerSupportEventsForStaffApp(
   return events.filter(e => {
     if (peerSupportEventRecordedMs(e) < cutoff) return false;
     if (session.role === 'admin') return true;
-    return (
-      e.createdBy.trim().toLowerCase() === me || e.providerUsername.trim().toLowerCase() === me
-    );
+    const createdBy = String(e.createdBy ?? '').trim().toLowerCase();
+    const provider = String(e.providerUsername ?? '').trim().toLowerCase();
+    return createdBy === me || provider === me;
   });
 }
 

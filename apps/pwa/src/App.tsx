@@ -33,6 +33,8 @@ import { ModernColoring } from './modern/ModernColoring';
 import { ColoringPage } from './pages/ColoringPage';
 import { isEventLoggerPhaseOnly } from './lib/eventLoggerPhase';
 
+const eventLoggerPhase = isEventLoggerPhaseOnly();
+
 function MemberNav(): React.ReactElement {
   const { pathname } = useLocation();
   const helpActive = pathname === '/' || pathname === '/request';
@@ -203,7 +205,7 @@ function Layout(props: { children: React.ReactNode }): React.ReactElement {
         </p>
       ) : null}
 
-      {adminSite ? (
+      {adminSite && !eventLoggerPhase ? (
         <nav className="app-nav" aria-label="Main navigation">
           <NavLink
             to="/"

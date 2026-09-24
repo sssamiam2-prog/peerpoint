@@ -1545,15 +1545,18 @@ export function StaffPage(): React.ReactElement {
   }
 
   const isAdmin = meta?.role === 'admin';
-  const staffEventLoggerOnly = isEventLoggerPhaseOnly() && !isAdmin;
+  const eventLoggerFocusUi = isEventLoggerPhaseOnly();
   // Admin tools work in the installable member app (Windows/desktop PWA), not only on the Admin host.
   const showMembersTab = isAdmin;
-  const showContentTab = isAdmin;
-  const showReportsTab = isAdmin;
-  const showTestTab = isAdmin;
+  const showContentTab = isAdmin && !eventLoggerFocusUi;
+  const showReportsTab = isAdmin && !eventLoggerFocusUi;
+  const showTestTab = isAdmin && !eventLoggerFocusUi;
   const adminOnlyTabs: WorkspaceTab[] = ['members', 'content', 'reports', 'test'];
+  const eventLoggerAllowedTabs: WorkspaceTab[] = isAdmin
+    ? ['peerEvents', 'members', 'account']
+    : ['peerEvents', 'account'];
   const tab =
-    staffEventLoggerOnly && activeTab !== 'peerEvents' && activeTab !== 'account'
+    eventLoggerFocusUi && !eventLoggerAllowedTabs.includes(activeTab)
       ? 'peerEvents'
       : adminOnlyTabs.includes(activeTab) && !showMembersTab && activeTab === 'members'
         ? 'requests'
@@ -1570,14 +1573,14 @@ export function StaffPage(): React.ReactElement {
 
   return (
     <div className="page-shell" onPointerDownCapture={() => unlockSoftAudio()}>
-      {staffEventLoggerOnly ? (
+      {eventLoggerFocusUi ? (
         <p style={{ marginTop: 12, fontSize: 14, maxWidth: 640 }}>
-          Training mode: use the <strong>Event Logger</strong> to record peer support interactions. Other PEERPoint
-          features will be enabled later.
+          Record peer support events on the <strong>Event Logger</strong> tab. Other PEERPoint tools are hidden until
+          rollout continues{isAdmin ? ' (full admin tools return when training phase ends)' : ''}.
         </p>
       ) : null}
 
-      {alertRequestIds.length > 0 && !staffEventLoggerOnly ? (
+      {alertRequestIds.length > 0 && !eventLoggerFocusUi ? (
         <div
           className="staff-assignment-alert"
           role="alertdialog"
@@ -1620,11 +1623,11 @@ export function StaffPage(): React.ReactElement {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: 0 }}>
-            {isAdmin ? 'Admin workspace' : staffEventLoggerOnly ? 'Peer Support Event Logger' : 'Staff workspace'}
+            {eventLoggerFocusUi ? 'Peer Support Event Logger' : isAdmin ? 'Admin workspace' : 'Staff workspace'}
           </h2>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {isAdmin && !onProdAdminHost ? (
+          {isAdmin && !onProdAdminHost && !eventLoggerFocusUi ? (
             <a
               className="btn-ghost"
               href={`https://${ADMIN_HOST}/`}
@@ -1639,7 +1642,7 @@ export function StaffPage(): React.ReactElement {
         </div>
       </div>
 
-      {!staffEventLoggerOnly ? (
+      {!eventLoggerFocusUi ? (
       <section
         className="staff-welcome"
         aria-label="Welcome and availability"
@@ -1752,13 +1755,13 @@ export function StaffPage(): React.ReactElement {
         >
           <h3 style={{ margin: 0, fontSize: 22 }}>Welcome, {welcomeName}</h3>
           <p style={{ margin: '6px 0 0', fontSize: 14 }}>
-            Signed in as <strong>Staff</strong>
+            Signed in as <strong>{isAdmin ? 'Admin' : 'Staff'}</strong>
             {meta?.username ? ` (${meta.username})` : ''}. Record each peer support event on the Event Logger tab.
           </p>
         </section>
       )}
 
-      {!staffEventLoggerOnly ? (
+      {!eventLoggerFocusUi ? (
       <p style={{ marginTop: 10, fontSize: 14 }}>
         {showTestTab ? (
           <>
@@ -1788,7 +1791,7 @@ export function StaffPage(): React.ReactElement {
         >
           Event Logger
         </button>
-        {!staffEventLoggerOnly ? (
+        {!eventLoggerFocusUi ? (
           <>
             <button
               type="button"
@@ -1891,17 +1894,22 @@ export function StaffPage(): React.ReactElement {
       </div>
 
       {tab === 'peerEvents' ? (
-        <PeerSupportEventLoggerPanel
-          authHeaders={authHeaders}
-          defaultProvider={
-            meta?.username
-              ? { username: meta.username, displayName: meta.displayName || meta.username }
-              : undefined
-          }
-        />
+        <>
+          <PeerSupportEventLoggerPanel
+            authHeaders={authHeaders}
+            defaultProvider={
+              meta?.username
+                ? { username: meta.username, displayName: meta.displayName || meta.username }
+                : undefined
+            }
+          />
+          {isAdmin && eventLoggerFocusUi ? (
+            <PeerSupportHelpTypesAdmin authHeaders={authHeaders} />
+          ) : null}
+        </>
       ) : null}
 
-      {tab === 'requests' && !staffEventLoggerOnly ? (
+      {tab === 'requests' && !eventLoggerFocusUi ? (
         <section
           className="staff-tab-panel"
           role="tabpanel"
@@ -2141,7 +2149,7 @@ export function StaffPage(): React.ReactElement {
         </section>
       ) : null}
 
-      {tab === 'onCall' && !staffEventLoggerOnly ? (
+      {tab === 'onCall' && !eventLoggerFocusUi ? (
         <section className="staff-tab-panel" role="tabpanel" id="panel-onCall" aria-labelledby="tab-onCall">
           <h3 style={{ marginTop: 0 }}>On Call schedule</h3>
           <p style={{ fontSize: 14, color: 'var(--text)' }}>
@@ -2747,7 +2755,7 @@ export function StaffPage(): React.ReactElement {
         </>
       ) : null}
 
-      {tab === 'contacts' && !staffEventLoggerOnly ? <ContactLogPanel authHeaders={authHeaders} /> : null}
+      {tab === 'contacts' && !eventLoggerFocusUi ? <ContactLogPanel authHeaders={authHeaders} /> : null}
 
       {tab === 'test' && showTestTab ? (
         <AdminTestPanel authHeaders={authHeaders} onAdminHost={onAdminHost} />
