@@ -1,4 +1,4 @@
-import { requireAdmin, requireStaffOrAdmin } from '../../_lib/staffAuth';
+import { canEditPeerSupportHelpTypes, requireStaffOrAdmin } from '../../_lib/staffAuth';
 import {
   corsHeaders,
   json,
@@ -24,8 +24,11 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
 
 export async function onRequestPut({ request, env }: Ctx): Promise<Response> {
   const origin = request.headers.get('Origin');
-  const auth = await requireAdmin(request, env);
+  const auth = await requireStaffOrAdmin(request, env);
   if ('error' in auth) return json({ error: auth.error }, auth.status, origin);
+  if (!canEditPeerSupportHelpTypes(auth.session)) {
+    return json({ error: 'You do not have permission to edit Resources / Referrals options.' }, 403, origin);
+  }
 
   let body: Record<string, unknown>;
   try {

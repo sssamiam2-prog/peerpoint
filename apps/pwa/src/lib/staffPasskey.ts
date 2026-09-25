@@ -7,6 +7,7 @@ type LoginResult = {
   username?: string;
   displayName?: string;
   mustChangePassword?: boolean;
+  canEditPeerSupportHelpTypes?: boolean;
 };
 
 export async function registerStaffPasskey(authToken: string): Promise<{ ok: true } | { error: string }> {
@@ -79,7 +80,8 @@ export async function loginWithStaffPasskey(
     role: data.role,
     username: data.username,
     displayName: data.displayName,
-    mustChangePassword: data.mustChangePassword === true
+    mustChangePassword: data.mustChangePassword === true,
+    canEditPeerSupportHelpTypes: data.canEditPeerSupportHelpTypes === true
   };
   return { ok: true, data: data as LoginResult, meta };
 }

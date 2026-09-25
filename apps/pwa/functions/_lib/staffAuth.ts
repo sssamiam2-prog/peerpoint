@@ -27,6 +27,16 @@ export const SEED_GLOBAL_ADMIN_PASSWORD = 'thisispeersupport';
 
 const MASTER_ADMIN_USERNAMES = new Set([SEED_ADMIN_USERNAME, SEED_GLOBAL_ADMIN_USERNAME]);
 
+/** May edit Event Logger “Resources / Referrals” options without full admin role. */
+export const PEER_SUPPORT_HELP_TYPES_EDITOR_USERNAMES = new Set(
+  ['ctsmith@saltlakecounty.gov', 'mijohnson@saltlakecounty.gov'].map(u => u.toLowerCase())
+);
+
+export function canEditPeerSupportHelpTypes(session: Pick<StaffSession, 'role' | 'username'>): boolean {
+  if (session.role === 'admin') return true;
+  return PEER_SUPPORT_HELP_TYPES_EDITOR_USERNAMES.has(session.username.trim().toLowerCase());
+}
+
 export type StaffRole = 'admin' | 'staff';
 
 /** Used for member preference matching on immediate contact. */

@@ -16,6 +16,7 @@ import {
   type OnCallSlot
 } from '../../_lib/store';
 import {
+  canEditPeerSupportHelpTypes,
   displayNameFor,
   ensureSeedAdmin,
   isOperationalPeer,
@@ -140,7 +141,8 @@ export async function onRequestGet({ request, env, waitUntil }: Ctx): Promise<Re
         peerAvailable: avail.peerAvailable,
         unavailableSince: avail.unavailableSince,
         unavailableReason: avail.unavailableReason,
-        mustChangePassword: meUser?.mustChangePassword === true
+        mustChangePassword: meUser?.mustChangePassword === true,
+        canEditPeerSupportHelpTypes: canEditPeerSupportHelpTypes(auth.session)
       }
     },
     200,

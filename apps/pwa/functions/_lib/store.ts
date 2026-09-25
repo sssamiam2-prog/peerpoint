@@ -557,6 +557,8 @@ export const DEFAULT_PEER_SUPPORT_HELP_TYPES = [
 
 export type PrpsGender = 'male' | 'female' | 'nonBinary' | 'preferNotToSay' | 'unknown';
 
+export type WorkRelatedIncident = 'yes' | 'no';
+
 export type PeerSupportEvent = {
   id: string;
   /** Calendar date of the peer support interaction (YYYY-MM-DD). */
@@ -564,6 +566,7 @@ export type PeerSupportEvent = {
   recordedAt: string;
   prpsBureau: string;
   prpsGender: PrpsGender;
+  workRelatedIncident?: WorkRelatedIncident;
   helpType: string;
   providerDisplayName: string;
   providerUsername: string;
@@ -598,13 +601,27 @@ export function normalizePrpsGender(raw: unknown): PrpsGender | null {
   return null;
 }
 
+export function normalizeWorkRelatedIncident(raw: unknown): WorkRelatedIncident | null {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'yes' || s === 'no') return s;
+  if (s === 'true' || s === 'y') return 'yes';
+  if (s === 'false' || s === 'n') return 'no';
+  return null;
+}
+
 export function normalizeHelpTypes(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
-  const out = raw
-    .map(v => String(v ?? '').trim())
-    .filter(Boolean);
-  const unique = [...new Set(out)];
-  return unique.length ? unique : [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    const s = String(v ?? '').trim();
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out.length ? out : [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
 }
 
 export async function loadPeerSupportHelpTypes(env: Env): Promise<string[]> {

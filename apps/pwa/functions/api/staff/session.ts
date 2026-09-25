@@ -1,6 +1,12 @@
 import { corsHeaders, json, type Env } from '../../_lib/store';
 import { availabilityPublicFields } from '../../_lib/peerAvailability';
-import { displayNameFor, ensureSeedAdmin, loadUsers, requireStaffOrAdmin } from '../../_lib/staffAuth';
+import {
+  canEditPeerSupportHelpTypes,
+  displayNameFor,
+  ensureSeedAdmin,
+  loadUsers,
+  requireStaffOrAdmin
+} from '../../_lib/staffAuth';
 import { listPasskeysForUser } from '../../_lib/webauthn';
 
 type Ctx = { request: Request; env: Env };
@@ -33,7 +39,8 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
         peerAvailable: avail.peerAvailable,
         unavailableSince: avail.unavailableSince,
         unavailableReason: avail.unavailableReason,
-        mustChangePassword: meUser?.mustChangePassword === true
+        mustChangePassword: meUser?.mustChangePassword === true,
+        canEditPeerSupportHelpTypes: canEditPeerSupportHelpTypes(auth.session)
       }
     },
     200,

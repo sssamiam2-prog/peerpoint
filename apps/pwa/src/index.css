@@ -2366,6 +2366,79 @@ a.crisis-modal__call-btn {
   border-width: 2px;
 }
 
+.help-types-admin-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.help-types-admin-list__empty {
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.help-types-admin-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.help-types-admin-list__label {
+  flex: 1 1 12rem;
+  font-size: 15px;
+}
+
+.help-types-admin-list__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.help-types-admin-list__btn {
+  min-width: 2.5rem;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.help-types-admin-list__btn--remove {
+  min-width: auto;
+}
+
+.help-types-admin-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin-top: 16px;
+  max-width: 640px;
+}
+
+.help-types-admin-add label {
+  flex: 1 1 220px;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.help-types-admin-add input {
+  font: inherit;
+  font-weight: 400;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
 .contact-log-controls {
   display: flex;
   flex-wrap: wrap;

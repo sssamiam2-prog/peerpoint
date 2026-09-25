@@ -8,6 +8,7 @@ type PeerEvent = {
   recordedAt: string;
   prpsBureau: string;
   prpsGender: string;
+  workRelatedIncident?: 'yes' | 'no';
   helpType: string;
   providerDisplayName: string;
   totalMinutes: number;
@@ -22,8 +23,19 @@ const GENDER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'unknown', label: 'Unknown' }
 ];
 
+const WORK_INCIDENT_OPTIONS: Array<{ value: 'yes' | 'no'; label: string }> = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' }
+];
+
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function formatWorkIncident(value: PeerEvent['workRelatedIncident']): string {
+  if (value === 'yes') return 'Work related: Yes';
+  if (value === 'no') return 'Work related: No';
+  return '';
 }
 
 export function PeerSupportEventLoggerPanel(props: {
@@ -39,10 +51,11 @@ export function PeerSupportEventLoggerPanel(props: {
   const [success, setSuccess] = React.useState<string | undefined>();
 
   const [eventDate, setEventDate] = React.useState(todayIsoDate);
+  const [providerUsername, setProviderUsername] = React.useState(props.defaultProvider?.username ?? '');
   const [prpsBureau, setPrpsBureau] = React.useState('');
   const [prpsGender, setPrpsGender] = React.useState('');
+  const [workRelatedIncident, setWorkRelatedIncident] = React.useState<'yes' | 'no' | ''>('');
   const [helpType, setHelpType] = React.useState('');
-  const [providerUsername, setProviderUsername] = React.useState(props.defaultProvider?.username ?? '');
   const [totalMinutes, setTotalMinutes] = React.useState('');
 
   const load = React.useCallback(async (): Promise<void> => {
@@ -63,7 +76,7 @@ export function PeerSupportEventLoggerPanel(props: {
     setHelpTypes(data.helpTypes ?? []);
     setProviders(data.providers ?? []);
     setRecent(data.events ?? []);
-    setHelpType(prev => prev || data.helpTypes?.[0] || '');
+    setHelpType('');
     setProviderUsername(prev => prev || props.defaultProvider?.username || '');
   }, [props]);
 
@@ -83,11 +96,12 @@ export function PeerSupportEventLoggerPanel(props: {
       headers: props.authHeaders(),
       body: JSON.stringify({
         eventDate,
-        prpsBureau,
-        prpsGender,
-        helpType,
         providerUsername,
         providerDisplayName: selectedProvider?.displayName || props.defaultProvider?.displayName || providerUsername,
+        prpsBureau,
+        prpsGender,
+        workRelatedIncident,
+        helpType,
         totalMinutes: Number(totalMinutes)
       })
     });
@@ -100,6 +114,7 @@ export function PeerSupportEventLoggerPanel(props: {
     setSuccess('Peer Support Event saved.');
     setPrpsBureau('');
     setPrpsGender('');
+    setWorkRelatedIncident('');
     setTotalMinutes('');
     setEventDate(todayIsoDate());
     void load();
@@ -119,7 +134,7 @@ export function PeerSupportEventLoggerPanel(props: {
 
       <form className="event-logger-form" onSubmit={e => void onSubmit(e)}>
         <label className="event-logger-form__field">
-          Date of peer support
+          Date of Peer Support
           <input
             className="event-logger-form__control"
             type="date"
@@ -129,49 +144,7 @@ export function PeerSupportEventLoggerPanel(props: {
           />
         </label>
         <label className="event-logger-form__field">
-          Bureau <span>(person receiving peer support)</span>
-          <input
-            className="event-logger-form__control"
-            value={prpsBureau}
-            onChange={ev => setPrpsBureau(ev.target.value)}
-            placeholder="e.g. Corrections, Patrol, Administration"
-            required
-            autoComplete="organization"
-          />
-        </label>
-        <label className="event-logger-form__field">
-          Gender <span>(person receiving peer support)</span>
-          <select
-            className="event-logger-form__control event-logger-form__control--select"
-            value={prpsGender}
-            onChange={ev => setPrpsGender(ev.target.value)}
-            required
-          >
-            <option value="">Select…</option>
-            {GENDER_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="event-logger-form__field">
-          Type of help
-          <select
-            className="event-logger-form__control event-logger-form__control--select"
-            value={helpType}
-            onChange={ev => setHelpType(ev.target.value)}
-            required
-          >
-            {helpTypes.map(t => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="event-logger-form__field">
-          Person providing peer support
+          Person Providing Peer Support
           <select
             className="event-logger-form__control event-logger-form__control--select"
             value={providerUsername}
@@ -187,7 +160,72 @@ export function PeerSupportEventLoggerPanel(props: {
           </select>
         </label>
         <label className="event-logger-form__field">
-          Total time spent (minutes)
+          Bureau <span>(person receiving support)</span>
+          <input
+            className="event-logger-form__control"
+            value={prpsBureau}
+            onChange={ev => setPrpsBureau(ev.target.value)}
+            placeholder="e.g. Corrections, Patrol, Administration"
+            required
+            autoComplete="organization"
+          />
+        </label>
+        <label className="event-logger-form__field">
+          Gender <span>(person receiving support)</span>
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={prpsGender}
+            onChange={ev => setPrpsGender(ev.target.value)}
+            required
+          >
+            <option value="">Select…</option>
+            {GENDER_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="event-logger-form__field">
+          Work Related Incident
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={workRelatedIncident}
+            onChange={ev => setWorkRelatedIncident(ev.target.value as 'yes' | 'no' | '')}
+            required
+          >
+            <option value="">Select…</option>
+            {WORK_INCIDENT_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="event-logger-form__field">
+          Resources / Referrals
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={helpType}
+            onChange={ev => setHelpType(ev.target.value)}
+            required
+          >
+            <option value="">Select…</option>
+            {helpTypes.length === 0 ? (
+              <option value="" disabled>
+                No options yet — ask an admin to add Resources / Referrals
+              </option>
+            ) : (
+              helpTypes.map(t => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <label className="event-logger-form__field">
+          Total Time Spent <span>(minutes)</span>
           <input
             className="event-logger-form__control event-logger-form__control--minutes"
             type="number"
@@ -211,12 +249,16 @@ export function PeerSupportEventLoggerPanel(props: {
         <p style={{ fontSize: 15, color: 'var(--text)' }}>No events logged yet.</p>
       ) : (
         <ul style={{ paddingLeft: 18, fontSize: 15, maxWidth: 720, lineHeight: 1.5 }}>
-          {recent.map(ev => (
-            <li key={ev.id} style={{ marginBottom: 8 }}>
-              <strong>{ev.eventDate}</strong> — {ev.helpType} · {ev.prpsBureau} · {ev.totalMinutes} min ·{' '}
-              {ev.providerDisplayName}
-            </li>
-          ))}
+          {recent.map(ev => {
+            const incident = formatWorkIncident(ev.workRelatedIncident);
+            return (
+              <li key={ev.id} style={{ marginBottom: 8 }}>
+                <strong>{ev.eventDate}</strong> — {ev.helpType}
+                {incident ? ` · ${incident}` : ''} · {ev.prpsBureau} · {ev.totalMinutes} min ·{' '}
+                {ev.providerDisplayName}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Peer Support Logged Events</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="mse-root">
+      <header class="mse-header">
+        <div>
+          <p class="mse-eyebrow">SH-PS · PEERPoint</p>
+          <h1>Peer Support Logged Events</h1>
+          <p class="mse-lede">
+            Search events synced from <strong>mypeerpoint.com</strong> into the
+            <strong>PeerSupportEvents</strong> list. Use <strong>Sync from PEERPoint</strong> (Power Automate) on this
+            page before searching if data looks stale.
+          </p>
+        </div>
+      </header>
+
+      <section class="mse-filters" aria-label="Search filters">
+        <div class="mse-filter-grid">
+          <label class="mse-field">
+            <span>Peer supporter</span>
+            <input id="filterPeer" type="search" placeholder="Name contains…" autocomplete="off" />
+          </label>
+          <label class="mse-field">
+            <span>Event date from</span>
+            <input id="filterDateFrom" type="date" />
+          </label>
+          <label class="mse-field">
+            <span>Event date to</span>
+            <input id="filterDateTo" type="date" />
+          </label>
+          <label class="mse-field">
+            <span>Resources / Referrals</span>
+            <select id="filterHelpType">
+              <option value="">All types</option>
+            </select>
+          </label>
+        </div>
+        <div class="mse-actions">
+          <button type="button" id="btnSearch" class="mse-btn mse-btn-primary">Search</button>
+          <button type="button" id="btnClear" class="mse-btn mse-btn-ghost">Clear</button>
+          <button type="button" id="btnReload" class="mse-btn mse-btn-ghost">Reload list</button>
+        </div>
+      </section>
+
+      <p id="status" class="mse-status" role="status" aria-live="polite"></p>
+      <p id="error" class="mse-error" role="alert" hidden></p>
+
+      <div class="mse-table-wrap">
+        <table class="mse-table" id="resultsTable">
+          <thead>
+            <tr>
+              <th scope="col">Event date</th>
+              <th scope="col">Peer supporter</th>
+              <th scope="col">Resources / Referrals</th>
+              <th scope="col">Work related</th>
+              <th scope="col">PRPS bureau</th>
+              <th scope="col">Minutes</th>
+              <th scope="col">Recorded</th>
+              <th scope="col">Logged by</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+      <p class="mse-foot" id="resultCount"></p>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

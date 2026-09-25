@@ -1,5 +1,6 @@
 import { corsHeaders, json, type Env } from '../../_lib/store';
 import {
+  canEditPeerSupportHelpTypes,
   createSession,
   displayNameFor,
   ensureSeedAdmin,
@@ -91,7 +92,8 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
       role: session.role,
       username: session.username,
       displayName: session.displayName,
-      mustChangePassword: user.mustChangePassword === true
+      mustChangePassword: user.mustChangePassword === true,
+      canEditPeerSupportHelpTypes: canEditPeerSupportHelpTypes(session)
     },
     200,
     origin

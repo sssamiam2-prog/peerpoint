@@ -33,6 +33,10 @@ import {
   writeStaffSession
 } from '../lib/staffSessionStorage';
 
+const PEER_SUPPORT_HELP_TYPES_EDITOR_USERNAMES = new Set(
+  ['ctsmith@saltlakecounty.gov', 'mijohnson@saltlakecounty.gov'].map(u => u.toLowerCase())
+);
+
 function isMasterAdminUsername(username: string): boolean {
   const u = username.trim().toLowerCase();
   return u === 'admin' || u === 'admn';
@@ -85,6 +89,7 @@ type SessionMeta = {
   unavailableSince?: string;
   unavailableReason?: string;
   mustChangePassword?: boolean;
+  canEditPeerSupportHelpTypes?: boolean;
 };
 
 type PublicAccount = {
@@ -169,6 +174,7 @@ type WorkspaceTab =
   | 'onCall'
   | 'contacts'
   | 'members'
+  | 'helpTypes'
   | 'content'
   | 'reports'
   | 'test'
@@ -579,6 +585,7 @@ export function StaffPage(): React.ReactElement {
         username?: string;
         displayName?: string;
         mustChangePassword?: boolean;
+        canEditPeerSupportHelpTypes?: boolean;
         error?: string;
       };
       if (!res.ok || !data.token || !data.role) {
@@ -592,7 +599,8 @@ export function StaffPage(): React.ReactElement {
         role: data.role,
         username: data.username,
         displayName: data.displayName,
-        mustChangePassword: data.mustChangePassword === true
+        mustChangePassword: data.mustChangePassword === true,
+        canEditPeerSupportHelpTypes: data.canEditPeerSupportHelpTypes === true
       };
       persistSession(data.token, nextMeta, rememberMe);
       setPassword('');
@@ -1707,19 +1715,27 @@ export function StaffPage(): React.ReactElement {
   const eventLoggerFocusUi = isEventLoggerPhaseOnly();
   // Admin tools work in the installable member app (Windows/desktop PWA), not only on the Admin host.
   const showMembersTab = isAdmin;
+  const showHelpTypesTab =
+    isAdmin ||
+    meta?.canEditPeerSupportHelpTypes === true ||
+    PEER_SUPPORT_HELP_TYPES_EDITOR_USERNAMES.has((meta?.username ?? '').trim().toLowerCase());
   const showContentTab = isAdmin && !eventLoggerFocusUi;
   const showReportsTab = isAdmin && !eventLoggerFocusUi;
   const showTestTab = isAdmin && !eventLoggerFocusUi;
-  const adminOnlyTabs: WorkspaceTab[] = ['members', 'content', 'reports', 'test'];
+  const adminOnlyTabs: WorkspaceTab[] = ['members', 'helpTypes', 'content', 'reports', 'test'];
   const eventLoggerAllowedTabs: WorkspaceTab[] = isAdmin
-    ? ['peerEvents', 'members', 'account']
-    : ['peerEvents', 'account'];
+    ? ['peerEvents', 'members', 'helpTypes', 'account']
+    : showHelpTypesTab
+      ? ['peerEvents', 'helpTypes', 'account']
+      : ['peerEvents', 'account'];
   const tab =
     eventLoggerFocusUi && !eventLoggerAllowedTabs.includes(activeTab)
       ? 'peerEvents'
       : adminOnlyTabs.includes(activeTab) && !showMembersTab && activeTab === 'members'
         ? 'requests'
-        : adminOnlyTabs.includes(activeTab) && activeTab === 'content' && !showContentTab
+        : adminOnlyTabs.includes(activeTab) && activeTab === 'helpTypes' && !showHelpTypesTab
+          ? 'peerEvents'
+          : adminOnlyTabs.includes(activeTab) && activeTab === 'content' && !showContentTab
           ? 'requests'
           : adminOnlyTabs.includes(activeTab) && activeTab === 'reports' && !showReportsTab
             ? 'requests'
@@ -2000,6 +2016,19 @@ export function StaffPage(): React.ReactElement {
             Members
           </button>
         ) : null}
+        {showHelpTypesTab ? (
+          <button
+            type="button"
+            role="tab"
+            id="tab-helpTypes"
+            aria-selected={tab === 'helpTypes'}
+            aria-controls="panel-helpTypes"
+            className={tab === 'helpTypes' ? 'staff-tab is-active' : 'staff-tab'}
+            onClick={() => setActiveTab('helpTypes')}
+          >
+            Resources / Referrals
+          </button>
+        ) : null}
         {showContentTab ? (
           <button
             type="button"
@@ -2053,19 +2082,14 @@ export function StaffPage(): React.ReactElement {
       </div>
 
       {tab === 'peerEvents' ? (
-        <>
-          <PeerSupportEventLoggerPanel
-            authHeaders={authHeaders}
-            defaultProvider={
-              meta?.username
-                ? { username: meta.username, displayName: meta.displayName || meta.username }
-                : undefined
-            }
-          />
-          {isAdmin && eventLoggerFocusUi ? (
-            <PeerSupportHelpTypesAdmin authHeaders={authHeaders} />
-          ) : null}
-        </>
+        <PeerSupportEventLoggerPanel
+          authHeaders={authHeaders}
+          defaultProvider={
+            meta?.username
+              ? { username: meta.username, displayName: meta.displayName || meta.username }
+              : undefined
+          }
+        />
       ) : null}
 
       {tab === 'requests' && !eventLoggerFocusUi ? (
@@ -2942,11 +2966,19 @@ export function StaffPage(): React.ReactElement {
         </section>
       ) : null}
 
-      {tab === 'content' && showContentTab ? (
-        <>
-          <AdminContentPanel authHeaders={authHeaders} />
+      {tab === 'helpTypes' && showHelpTypesTab ? (
+        <section
+          className="staff-tab-panel"
+          role="tabpanel"
+          id="panel-helpTypes"
+          aria-labelledby="tab-helpTypes"
+        >
           <PeerSupportHelpTypesAdmin authHeaders={authHeaders} />
-        </>
+        </section>
+      ) : null}
+
+      {tab === 'content' && showContentTab ? (
+        <AdminContentPanel authHeaders={authHeaders} />
       ) : null}
 
       {tab === 'contacts' && !eventLoggerFocusUi ? <ContactLogPanel authHeaders={authHeaders} /> : null}

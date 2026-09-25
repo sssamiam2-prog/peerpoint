@@ -8,6 +8,7 @@ import {
   loadPeerSupportHelpTypes,
   newId,
   normalizePrpsGender,
+  normalizeWorkRelatedIncident,
   parseEventDate,
   savePeerSupportEvents,
   type Env,
@@ -78,7 +79,12 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   const helpTypes = await loadPeerSupportHelpTypes(env);
   const helpType = String(body.helpType ?? '').trim();
   if (!helpType || !helpTypes.includes(helpType)) {
-    return json({ error: 'Select a valid type of help.' }, 400, origin);
+    return json({ error: 'Select a valid Resources / Referrals option.' }, 400, origin);
+  }
+
+  const workRelatedIncident = normalizeWorkRelatedIncident(body.workRelatedIncident);
+  if (!workRelatedIncident) {
+    return json({ error: 'Select whether this was a work related incident (Yes or No).' }, 400, origin);
   }
 
   const providerDisplayName = String(body.providerDisplayName ?? '').trim();
@@ -101,6 +107,7 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     recordedAt: new Date().toISOString(),
     prpsBureau,
     prpsGender,
+    workRelatedIncident,
     helpType,
     providerDisplayName,
     providerUsername,

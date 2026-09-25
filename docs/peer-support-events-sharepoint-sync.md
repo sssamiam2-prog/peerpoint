@@ -1,6 +1,8 @@
 # Peer Support Event Logger → SharePoint (SH-PS)
 
-Staff record events in the PEERPoint PWA (**Staff → Event Logger**). Site owners on [SH-PS](https://slcounty.sharepoint.com/sites/SH-PS) pull rows into the **PeerSupportEvents** list with Power Automate and a **Refresh PeerPoint** button (e.g. M365 extensibility app + Site Assets for any page scripts; SPFx not required).
+Staff record events in the PEERPoint PWA (**Staff → Event Logger**). Site owners on [SH-PS](https://slcounty.sharepoint.com/sites/SH-PS) pull rows into the **PeerSupportEvents** list with Power Automate, then search on the site page:
+
+**[Peer Support Logged Events](https://slcounty.sharepoint.com/sites/SH-PS/SitePages/Peer-Support-Logged-Events.aspx)** — MSE search app (Peer Supporter, date, type of peer support). See [mse-logged-events-app.md](./mse-logged-events-app.md) and [peer-support-events-power-automate-flow.md](./peer-support-events-power-automate-flow.md).
 
 ## One-time setup
 
@@ -26,7 +28,7 @@ Query (optional):
 
 Response: `{ exportedAt, count, events: [{ id, eventDate, prpsBureau, prpsGender, helpType, providerDisplayName, totalMinutes, ... }] }`
 
-Map `id` → list column **PeerPoint Event Id** (use as upsert key in the flow).
+Map `id` → list column **PeerPoint Event Id** (use as upsert key in the flow). Also set **Event Date (sortable)** (`EventDateValue`) from `eventDate` for views and the MSE app sort order.
 
 ## App retention (5 days)
 
@@ -38,17 +40,13 @@ Map `id` → list column **PeerPoint Event Id** (use as upsert key in the flow).
   That marks rows imported and **removes** them from PEERPoint when they are older than 5 days.
 - Events **not** yet marked imported are kept in KV so sync can retry (even past 5 days).
 
-## Power Automate (outline)
+## Power Automate
 
-1. **Manual trigger** — button on a SharePoint page (“Refresh PeerPoint”), run only as site owner.
-2. **HTTP** — GET integration URL with Bearer secret.
-3. **Parse JSON** — `events` array.
-4. **Apply to each** — **Get items** on PeerSupportEvents where `PeerPointEventId` eq `id`; if none, **Create item**, else **Update item**.
-5. **HTTP POST** (same Bearer secret) — body `{ "importedIds": [ ... ids synced this run ... ] }` to mark imported and purge aged rows from the app.
+Full step-by-step: **[peer-support-events-power-automate-flow.md](./peer-support-events-power-automate-flow.md)** (GET pending events → upsert list → POST `importedIds`).
 
 ## Admin: types of help
 
-Admins edit the Event Logger dropdown under **Content** → **Peer Support Event — types of help** (one option per line).
+Admins edit the Event Logger dropdown under **Help types** tab (one option per line).
 
 ## Training phase (member UI hidden)
 

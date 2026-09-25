@@ -99,6 +99,25 @@ function Ensure-FieldChoice {
   Write-Host "    + field $InternalName (Choice)" -ForegroundColor DarkGreen
 }
 
+function Ensure-FieldDateTime {
+  param([string]$ListTitle, [string]$InternalName, [string]$DisplayName, [switch]$Required)
+  $list = Get-PnPList -Identity $ListTitle
+  $f = Get-PnPField -List $list -Identity $InternalName -ErrorAction SilentlyContinue
+  if ($f) { return }
+  $null = Add-PnPField -List $list -DisplayName $DisplayName -InternalName $InternalName -Type DateTime -Required:$Required
+  Write-Host "    + field $InternalName (DateTime)" -ForegroundColor DarkGreen
+}
+
+function Ensure-FieldIndexed {
+  param([string]$ListTitle, [string]$InternalName)
+  $list = Get-PnPList -Identity $ListTitle
+  $f = Get-PnPField -List $list -Identity $InternalName -ErrorAction SilentlyContinue
+  if (-not $f) { return }
+  if ($f.Indexed) { return }
+  Set-PnPField -List $list -Identity $InternalName -Values @{ Indexed = $true }
+  Write-Host "    indexed $InternalName" -ForegroundColor DarkGreen
+}
+
 function Ensure-FieldUser {
   param([string]$ListTitle, [string]$InternalName, [string]$DisplayName)
   $list = Get-PnPList -Identity $ListTitle
@@ -154,6 +173,7 @@ Write-Host "`n=== PeerSupportEvents (staff event logger → Power Automate sync)
 Ensure-GenericList -Title 'PeerSupportEvents' | Out-Null
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'PeerPointEventId' -DisplayName 'PeerPoint Event Id' -Required
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'EventDate' -DisplayName 'Event Date' -Required
+Ensure-FieldDateTime -ListTitle 'PeerSupportEvents' -InternalName 'EventDateValue' -DisplayName 'Event Date (sortable)'
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'RecordedAt' -DisplayName 'Recorded At' -Required
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'PrpsBureau' -DisplayName 'PRPS Bureau' -Required
 Ensure-FieldChoice -ListTitle 'PeerSupportEvents' -InternalName 'PrpsGender' -DisplayName 'PRPS Gender' -Choices @('male', 'female', 'nonBinary', 'preferNotToSay', 'unknown') -Required
@@ -162,6 +182,10 @@ Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'ProviderDisplayNa
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'ProviderUsername' -DisplayName 'Provider Username'
 Ensure-FieldNumber -ListTitle 'PeerSupportEvents' -InternalName 'TotalMinutes' -DisplayName 'Total Minutes' -Required
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'CreatedByDisplay' -DisplayName 'Logged By'
+Ensure-FieldIndexed -ListTitle 'PeerSupportEvents' -InternalName 'ProviderDisplayName'
+Ensure-FieldIndexed -ListTitle 'PeerSupportEvents' -InternalName 'HelpType'
+Ensure-FieldIndexed -ListTitle 'PeerSupportEvents' -InternalName 'EventDate'
+Write-Host "  MSE search UI: sharepoint/mse-logged-events-app → Site Assets (see docs/mse-logged-events-app.md)" -ForegroundColor Yellow
 
 Write-Host "`n=== AuditLog ===" -ForegroundColor Cyan
 Ensure-GenericList -Title 'AuditLog' | Out-Null

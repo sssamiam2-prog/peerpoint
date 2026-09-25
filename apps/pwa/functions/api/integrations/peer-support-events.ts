@@ -20,6 +20,7 @@ function exportRow(e: PeerSupportEvent): Record<string, unknown> {
     recordedAt: e.recordedAt,
     prpsBureau: e.prpsBureau,
     prpsGender: e.prpsGender,
+    workRelatedIncident: e.workRelatedIncident ?? null,
     helpType: e.helpType,
     providerDisplayName: e.providerDisplayName,
     providerUsername: e.providerUsername,

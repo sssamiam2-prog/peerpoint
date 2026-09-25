@@ -6,6 +6,7 @@ export type StaffSessionMeta = {
   unavailableSince?: string;
   unavailableReason?: string;
   mustChangePassword?: boolean;
+  canEditPeerSupportHelpTypes?: boolean;
 };
 
 const TOKEN_KEY = 'peerpoint_staff_token';
