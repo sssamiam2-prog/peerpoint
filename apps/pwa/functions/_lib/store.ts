@@ -609,6 +609,49 @@ export function normalizeWorkRelatedIncident(raw: unknown): WorkRelatedIncident 
   return null;
 }
 
+/** Bureau of the person receiving peer support (three Sheriff bureaus + Admin). */
+export const PEER_SUPPORT_PRPS_BUREAUS = [
+  'Corrections',
+  'Public Safety',
+  'Law Enforcement',
+  'Admin'
+] as const;
+
+export type PrpsBureau = (typeof PEER_SUPPORT_PRPS_BUREAUS)[number];
+
+export function normalizePrpsBureau(raw: unknown): PrpsBureau | null {
+  const s = String(raw ?? '').trim();
+  if ((PEER_SUPPORT_PRPS_BUREAUS as readonly string[]).includes(s)) return s as PrpsBureau;
+  return null;
+}
+
+/** Total Time Spent dropdown values (minutes). */
+export const PEER_SUPPORT_TOTAL_TIME_MINUTES_OPTIONS = [
+  15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480
+] as const;
+
+export function normalizePeerSupportEventTotalMinutes(raw: unknown): number | null {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return null;
+  if (!(PEER_SUPPORT_TOTAL_TIME_MINUTES_OPTIONS as readonly number[]).includes(n)) return null;
+  return n;
+}
+
+/** How far back staff may pick a Date of Peer Support (dropdown). */
+export const PEER_SUPPORT_EVENT_DATE_LOOKBACK_DAYS = 365;
+
+export function normalizePeerSupportEventDate(raw: unknown): string | null {
+  const s = parseEventDate(raw);
+  if (!s) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  if (s > today) return null;
+  const min = new Date();
+  min.setUTCDate(min.getUTCDate() - PEER_SUPPORT_EVENT_DATE_LOOKBACK_DAYS);
+  const minIso = min.toISOString().slice(0, 10);
+  if (s < minIso) return null;
+  return s;
+}
+
 export function normalizeHelpTypes(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
   const out: string[] = [];

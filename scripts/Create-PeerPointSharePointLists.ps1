@@ -175,9 +175,10 @@ Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'PeerPointEventId'
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'EventDate' -DisplayName 'Event Date' -Required
 Ensure-FieldDateTime -ListTitle 'PeerSupportEvents' -InternalName 'EventDateValue' -DisplayName 'Event Date (sortable)'
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'RecordedAt' -DisplayName 'Recorded At' -Required
-Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'PrpsBureau' -DisplayName 'PRPS Bureau' -Required
+Ensure-FieldChoice -ListTitle 'PeerSupportEvents' -InternalName 'PrpsBureau' -DisplayName 'PRPS Bureau' -Choices @('Corrections', 'Public Safety', 'Law Enforcement', 'Admin') -Required
 Ensure-FieldChoice -ListTitle 'PeerSupportEvents' -InternalName 'PrpsGender' -DisplayName 'PRPS Gender' -Choices @('male', 'female', 'nonBinary', 'preferNotToSay', 'unknown') -Required
-Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'HelpType' -DisplayName 'Type of Help' -Required
+Ensure-FieldChoice -ListTitle 'PeerSupportEvents' -InternalName 'WorkRelatedIncident' -DisplayName 'Work Related Incident' -Choices @('yes', 'no')
+Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'HelpType' -DisplayName 'Resources / Referrals' -Required
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'ProviderDisplayName' -DisplayName 'Peer Supporter' -Required
 Ensure-FieldText -ListTitle 'PeerSupportEvents' -InternalName 'ProviderUsername' -DisplayName 'Provider Username'
 Ensure-FieldNumber -ListTitle 'PeerSupportEvents' -InternalName 'TotalMinutes' -DisplayName 'Total Minutes' -Required

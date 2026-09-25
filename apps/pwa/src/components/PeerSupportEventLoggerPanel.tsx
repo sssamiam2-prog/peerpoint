@@ -28,8 +28,39 @@ const WORK_INCIDENT_OPTIONS: Array<{ value: 'yes' | 'no'; label: string }> = [
   { value: 'no', label: 'No' }
 ];
 
+const DEFAULT_PRPS_BUREAUS = ['Corrections', 'Public Safety', 'Law Enforcement', 'Admin'] as const;
+const DEFAULT_TOTAL_TIME_MINUTES = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480] as const;
+const DEFAULT_DATE_LOOKBACK_DAYS = 365;
+
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function buildEventDateOptions(lookbackDays: number): string[] {
+  const days = Math.max(1, Math.min(lookbackDays, 3660));
+  const out: string[] = [];
+  const cursor = new Date();
+  for (let i = 0; i < days; i++) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+  return out;
+}
+
+function formatEventDateLabel(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  return dt.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function formatTotalMinutesLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes} minutes`;
+  if (minutes === 60) return '1 hour';
+  if (minutes % 60 === 0) return `${minutes / 60} hours`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return `${hours} hr ${rem} min`;
 }
 
 function formatWorkIncident(value: PeerEvent['workRelatedIncident']): string {
@@ -43,6 +74,11 @@ export function PeerSupportEventLoggerPanel(props: {
   defaultProvider?: { username: string; displayName: string };
 }): React.ReactElement {
   const [helpTypes, setHelpTypes] = React.useState<string[]>([]);
+  const [prpsBureaus, setPrpsBureaus] = React.useState<string[]>([...DEFAULT_PRPS_BUREAUS]);
+  const [totalTimeOptions, setTotalTimeOptions] = React.useState<number[]>([...DEFAULT_TOTAL_TIME_MINUTES]);
+  const [eventDateOptions, setEventDateOptions] = React.useState<string[]>(() =>
+    buildEventDateOptions(DEFAULT_DATE_LOOKBACK_DAYS)
+  );
   const [providers, setProviders] = React.useState<Provider[]>([]);
   const [recent, setRecent] = React.useState<PeerEvent[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -56,7 +92,7 @@ export function PeerSupportEventLoggerPanel(props: {
   const [prpsGender, setPrpsGender] = React.useState('');
   const [workRelatedIncident, setWorkRelatedIncident] = React.useState<'yes' | 'no' | ''>('');
   const [helpType, setHelpType] = React.useState('');
-  const [totalMinutes, setTotalMinutes] = React.useState('');
+  const [totalMinutes, setTotalMinutes] = React.useState<number | ''>('');
 
   const load = React.useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -64,6 +100,9 @@ export function PeerSupportEventLoggerPanel(props: {
     const res = await fetch('/api/staff/peer-support-events?limit=15', { headers: props.authHeaders() });
     const data = (await res.json().catch(() => ({}))) as {
       helpTypes?: string[];
+      prpsBureaus?: string[];
+      totalTimeMinutesOptions?: number[];
+      eventDateLookbackDays?: number;
       providers?: Provider[];
       events?: PeerEvent[];
       error?: string;
@@ -74,10 +113,15 @@ export function PeerSupportEventLoggerPanel(props: {
       return;
     }
     setHelpTypes(data.helpTypes ?? []);
+    if (data.prpsBureaus?.length) setPrpsBureaus(data.prpsBureaus);
+    if (data.totalTimeMinutesOptions?.length) setTotalTimeOptions(data.totalTimeMinutesOptions);
+    const lookback = data.eventDateLookbackDays ?? DEFAULT_DATE_LOOKBACK_DAYS;
+    setEventDateOptions(buildEventDateOptions(lookback));
     setProviders(data.providers ?? []);
     setRecent(data.events ?? []);
     setHelpType('');
     setProviderUsername(prev => prev || props.defaultProvider?.username || '');
+    setEventDate(prev => prev || todayIsoDate());
   }, [props]);
 
   React.useEffect(() => {
@@ -102,7 +146,7 @@ export function PeerSupportEventLoggerPanel(props: {
         prpsGender,
         workRelatedIncident,
         helpType,
-        totalMinutes: Number(totalMinutes)
+        totalMinutes
       })
     });
     const data = (await res.json().catch(() => ({}))) as { error?: string; event?: PeerEvent };
@@ -135,13 +179,19 @@ export function PeerSupportEventLoggerPanel(props: {
       <form className="event-logger-form" onSubmit={e => void onSubmit(e)}>
         <label className="event-logger-form__field">
           Date of Peer Support
-          <input
-            className="event-logger-form__control"
-            type="date"
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
             value={eventDate}
             onChange={ev => setEventDate(ev.target.value)}
             required
-          />
+          >
+            <option value="">Select…</option>
+            {eventDateOptions.map(iso => (
+              <option key={iso} value={iso}>
+                {formatEventDateLabel(iso)}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="event-logger-form__field">
           Person Providing Peer Support
@@ -161,14 +211,19 @@ export function PeerSupportEventLoggerPanel(props: {
         </label>
         <label className="event-logger-form__field">
           Bureau <span>(person receiving support)</span>
-          <input
-            className="event-logger-form__control"
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
             value={prpsBureau}
             onChange={ev => setPrpsBureau(ev.target.value)}
-            placeholder="e.g. Corrections, Patrol, Administration"
             required
-            autoComplete="organization"
-          />
+          >
+            <option value="">Select…</option>
+            {prpsBureaus.map(b => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="event-logger-form__field">
           Gender <span>(person receiving support)</span>
@@ -225,19 +280,23 @@ export function PeerSupportEventLoggerPanel(props: {
           </select>
         </label>
         <label className="event-logger-form__field">
-          Total Time Spent <span>(minutes)</span>
-          <input
-            className="event-logger-form__control event-logger-form__control--minutes"
-            type="number"
-            min={1}
-            max={1440}
-            step={1}
-            inputMode="numeric"
-            value={totalMinutes}
-            onChange={ev => setTotalMinutes(ev.target.value)}
-            placeholder="45"
+          Total Time Spent
+          <select
+            className="event-logger-form__control event-logger-form__control--select"
+            value={totalMinutes === '' ? '' : String(totalMinutes)}
+            onChange={ev => {
+              const v = ev.target.value;
+              setTotalMinutes(v === '' ? '' : Number(v));
+            }}
             required
-          />
+          >
+            <option value="">Select…</option>
+            {totalTimeOptions.map(m => (
+              <option key={m} value={m}>
+                {formatTotalMinutesLabel(m)}
+              </option>
+            ))}
+          </select>
         </label>
         <button type="submit" className="event-logger-form__submit" disabled={busy}>
           {busy ? 'Saving…' : 'Save event'}

@@ -57,7 +57,7 @@ function EmploymentFields(props: {
         <input
           value={state.bureau}
           onChange={e => setState(s => ({ ...s, bureau: e.target.value }))}
-          placeholder="e.g. Corrections, Enforcement, Court Services"
+          placeholder="e.g. Corrections, Public Safety, Law Enforcement"
           autoComplete="organization-title"
         />
       </label>

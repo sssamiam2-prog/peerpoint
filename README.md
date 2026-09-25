@@ -1,20 +1,39 @@
-# Introduction 
-TODO: Give a short introduction of your project. Let this section explain the objectives or the motivation behind this project. 
+# PEERPoint (local workspace)
 
-# Getting Started
-TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
-1.	Installation process
-2.	Software dependencies
-3.	Latest releases
-4.	API references
+This folder is your **local home** for PEERPoint source, docs, and architecture notes while working in Cursor.
 
-# Build and Test
-TODO: Describe and show how to build your code and run the tests. 
+## Quick links
 
-# Contribute
-TODO: Explain how other users and developers can contribute to make your code better. 
+- **Architecture:** [ARCHITECTURE.md](./ARCHITECTURE.md)
+- **Run the app:** `cd apps/pwa` → `npm install` → `npm run dev`
+- **Deploy:** `cd apps/pwa` → `npm run deploy:pages`
+- **Production:** [mypeerpoint.com](https://mypeerpoint.com) · [admin.mypeerpoint.com](https://admin.mypeerpoint.com)
+- **GitHub:** [sssamiam2-prog/peerpoint](https://github.com/sssamiam2-prog/peerpoint)
 
-If you want to learn more about creating good readme files then refer the following [guidelines](https://docs.microsoft.com/en-us/azure/devops/repos/git/create-a-readme?view=azure-devops). You can also seek inspiration from the below readme files:
-- [ASP.NET Core](https://github.com/aspnet/Home)
-- [Visual Studio Code](https://github.com/Microsoft/vscode)
-- [Chakra Core](https://github.com/Microsoft/ChakraCore)
+## Folder contents
+
+| Item | Description |
+|------|-------------|
+| `apps/pwa/` | React PWA + Cloudflare Functions (main product) |
+| `docs/` | Operational and integration documentation |
+| `scripts/` | SharePoint setup, generators, smoke tests |
+| `peer-support-app/` | Legacy SPFx (optional future embed) |
+| `ARCHITECTURE.md` | System design, APIs, hosts, training phase |
+
+## Git and sync
+
+A full copy of the project (excluding `node_modules`, `dist`, `.git`) lives here. The **git repository** may still be checked out at:
+
+`Desktop\Apps I Built\SPFx Project\Peer Support App`
+
+After editing in either location, keep them aligned:
+
+```powershell
+.\scripts\sync-from-spfx-repo.ps1
+```
+
+Or copy changes back to the SPFx folder before `git commit` / `git push` if that is still your remote-connected clone.
+
+## Docs index
+
+See [docs/dev-and-preview.md](./docs/dev-and-preview.md) for CI, Cloudflare, and domains.

@@ -1,15 +1,19 @@
 import { loadUsers, requireStaffOrAdmin } from '../../_lib/staffAuth';
 import {
-  clampEventMinutes,
   corsHeaders,
   filterPeerSupportEventsForStaffApp,
   json,
   loadAndMaintainPeerSupportEvents,
   loadPeerSupportHelpTypes,
   newId,
+  normalizePeerSupportEventDate,
+  normalizePeerSupportEventTotalMinutes,
+  normalizePrpsBureau,
   normalizePrpsGender,
   normalizeWorkRelatedIncident,
-  parseEventDate,
+  PEER_SUPPORT_EVENT_DATE_LOOKBACK_DAYS,
+  PEER_SUPPORT_PRPS_BUREAUS,
+  PEER_SUPPORT_TOTAL_TIME_MINUTES_OPTIONS,
   savePeerSupportEvents,
   type Env,
   type PeerSupportEvent
@@ -51,6 +55,9 @@ export async function onRequestGet({ request, env }: Ctx): Promise<Response> {
       events,
       helpTypes,
       providers,
+      prpsBureaus: [...PEER_SUPPORT_PRPS_BUREAUS],
+      totalTimeMinutesOptions: [...PEER_SUPPORT_TOTAL_TIME_MINUTES_OPTIONS],
+      eventDateLookbackDays: PEER_SUPPORT_EVENT_DATE_LOOKBACK_DAYS,
       retentionDays: 5
     },
     200,
@@ -70,8 +77,10 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'Invalid JSON body.' }, 400, origin);
   }
 
-  const prpsBureau = String(body.prpsBureau ?? '').trim();
-  if (!prpsBureau) return json({ error: 'Bureau of the person receiving peer support is required.' }, 400, origin);
+  const prpsBureau = normalizePrpsBureau(body.prpsBureau);
+  if (!prpsBureau) {
+    return json({ error: 'Select a valid bureau for the person receiving peer support.' }, 400, origin);
+  }
 
   const prpsGender = normalizePrpsGender(body.prpsGender);
   if (!prpsGender) return json({ error: 'Select a valid gender for the person receiving peer support.' }, 400, origin);
@@ -93,13 +102,15 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
     return json({ error: 'Person providing peer support is required.' }, 400, origin);
   }
 
-  const totalMinutes = clampEventMinutes(body.totalMinutes);
+  const totalMinutes = normalizePeerSupportEventTotalMinutes(body.totalMinutes);
   if (totalMinutes == null) {
-    return json({ error: 'Enter total time spent (minutes, at least 1).' }, 400, origin);
+    return json({ error: 'Select total time spent from the list.' }, 400, origin);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const eventDate = parseEventDate(body.eventDate) ?? today;
+  const eventDate = normalizePeerSupportEventDate(body.eventDate);
+  if (!eventDate) {
+    return json({ error: 'Select a valid date of peer support (not in the future).' }, 400, origin);
+  }
 
   const event: PeerSupportEvent = {
     id: newId(),
