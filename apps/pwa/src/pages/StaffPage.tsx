@@ -5,6 +5,7 @@ import { AdminContentPanel } from '../components/AdminContentPanel';
 import { AdminTestPanel } from '../components/AdminTestPanel';
 import { ContactLogPanel } from '../components/ContactLogPanel';
 import { PeerSupportEventLoggerPanel } from '../components/PeerSupportEventLoggerPanel';
+import { InstallAppButton } from '../components/InstallAppButton';
 import { PeerSupportHelpTypesAdmin } from '../components/PeerSupportHelpTypesAdmin';
 import { isEventLoggerPhaseOnly } from '../lib/eventLoggerPhase';
 import { TwilioPhoneVerify } from '../components/TwilioPhoneVerify';
@@ -1656,6 +1657,9 @@ export function StaffPage(): React.ReactElement {
             Need Admin tools? Use the <strong>Admin login</strong> tab above in this same app.
           </p>
         ) : null}
+        <div className="staff-login-install">
+          <InstallAppButton />
+        </div>
       </div>
     );
   }
