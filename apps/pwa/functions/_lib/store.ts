@@ -667,6 +667,52 @@ export function normalizeHelpTypes(raw: unknown): string[] {
   return out.length ? out : [...DEFAULT_PEER_SUPPORT_HELP_TYPES];
 }
 
+/** Multiple Resources / Referrals on one event (SharePoint HelpType text field). */
+export const PEER_SUPPORT_HELP_TYPE_SEPARATOR = '; ';
+
+export function parsePeerSupportHelpTypeStored(stored: string): string[] {
+  const s = String(stored ?? '').trim();
+  if (!s) return [];
+  return s.split(PEER_SUPPORT_HELP_TYPE_SEPARATOR).map(p => p.trim()).filter(Boolean);
+}
+
+export function serializePeerSupportHelpTypes(selected: string[]): string {
+  return selected.join(PEER_SUPPORT_HELP_TYPE_SEPARATOR);
+}
+
+/** Validates POST body helpTypes[] (or legacy helpType) against the configured list. */
+export function normalizePeerSupportHelpTypeSelection(
+  body: Record<string, unknown>,
+  allowed: string[]
+): string | null {
+  const allowedSet = new Set(allowed);
+  let rawList: string[] = [];
+  const fromArray = body.helpTypes ?? body.helpTypeSelections;
+  if (Array.isArray(fromArray)) {
+    rawList = fromArray.map(v => String(v ?? '').trim()).filter(Boolean);
+  } else {
+    const single = String(body.helpType ?? '').trim();
+    if (!single) rawList = [];
+    else if (single.includes(PEER_SUPPORT_HELP_TYPE_SEPARATOR)) {
+      rawList = parsePeerSupportHelpTypeStored(single);
+    } else {
+      rawList = [single];
+    }
+  }
+
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const item of rawList) {
+    if (!allowedSet.has(item)) return null;
+    if (seen.has(item)) continue;
+    seen.add(item);
+    unique.push(item);
+  }
+  if (unique.length === 0) return null;
+  unique.sort((a, b) => allowed.indexOf(a) - allowed.indexOf(b));
+  return serializePeerSupportHelpTypes(unique);
+}
+
 export async function loadPeerSupportHelpTypes(env: Env): Promise<string[]> {
   if (env.PEERPOINT_KV) {
     const raw = await env.PEERPOINT_KV.get(PEER_SUPPORT_HELP_TYPES_KEY);

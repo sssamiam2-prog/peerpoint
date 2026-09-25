@@ -91,7 +91,7 @@ export function PeerSupportEventLoggerPanel(props: {
   const [prpsBureau, setPrpsBureau] = React.useState('');
   const [prpsGender, setPrpsGender] = React.useState('');
   const [workRelatedIncident, setWorkRelatedIncident] = React.useState<'yes' | 'no' | ''>('');
-  const [helpType, setHelpType] = React.useState('');
+  const [selectedHelpTypes, setSelectedHelpTypes] = React.useState<string[]>([]);
   const [totalMinutes, setTotalMinutes] = React.useState<number | ''>('');
 
   const load = React.useCallback(async (): Promise<void> => {
@@ -119,7 +119,7 @@ export function PeerSupportEventLoggerPanel(props: {
     setEventDateOptions(buildEventDateOptions(lookback));
     setProviders(data.providers ?? []);
     setRecent(data.events ?? []);
-    setHelpType('');
+    setSelectedHelpTypes([]);
     setProviderUsername(prev => prev || props.defaultProvider?.username || '');
     setEventDate(prev => prev || todayIsoDate());
   }, [props]);
@@ -130,8 +130,18 @@ export function PeerSupportEventLoggerPanel(props: {
 
   const selectedProvider = providers.find(p => p.username === providerUsername);
 
+  function toggleHelpType(option: string): void {
+    setSelectedHelpTypes(prev =>
+      prev.includes(option) ? prev.filter(t => t !== option) : [...prev, option]
+    );
+  }
+
   async function onSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (selectedHelpTypes.length === 0) {
+      setError('Select at least one Resources / Referrals option.');
+      return;
+    }
     setBusy(true);
     setError(undefined);
     setSuccess(undefined);
@@ -145,7 +155,7 @@ export function PeerSupportEventLoggerPanel(props: {
         prpsBureau,
         prpsGender,
         workRelatedIncident,
-        helpType,
+        helpTypes: selectedHelpTypes,
         totalMinutes
       })
     });
@@ -257,28 +267,40 @@ export function PeerSupportEventLoggerPanel(props: {
             ))}
           </select>
         </label>
-        <label className="event-logger-form__field">
-          Resources / Referrals
-          <select
-            className="event-logger-form__control event-logger-form__control--select"
-            value={helpType}
-            onChange={ev => setHelpType(ev.target.value)}
-            required
-          >
-            <option value="">Select…</option>
-            {helpTypes.length === 0 ? (
-              <option value="" disabled>
-                No options yet — ask an admin to add Resources / Referrals
-              </option>
-            ) : (
-              helpTypes.map(t => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))
-            )}
-          </select>
-        </label>
+        <fieldset className="event-logger-form__field event-logger-form__field--checklist">
+          <legend>
+            Resources / Referrals <span>(select all that apply)</span>
+          </legend>
+          {helpTypes.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 400, textTransform: 'none' }}>
+              No options yet — ask an admin to add Resources / Referrals.
+            </p>
+          ) : (
+            <div className="event-logger-form__option-list" role="group" aria-label="Resources and referrals">
+              {helpTypes.map(t => {
+                const checked = selectedHelpTypes.includes(t);
+                const inputId = `help-type-${t.replace(/\W+/g, '-').slice(0, 48)}`;
+                return (
+                  <label
+                    key={t}
+                    htmlFor={inputId}
+                    className={`event-logger-form__option${checked ? ' is-selected' : ''}`}
+                  >
+                    <input
+                      id={inputId}
+                      type="checkbox"
+                      name="helpTypes"
+                      value={t}
+                      checked={checked}
+                      onChange={() => toggleHelpType(t)}
+                    />
+                    <span>{t}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </fieldset>
         <label className="event-logger-form__field">
           Total Time Spent
           <select

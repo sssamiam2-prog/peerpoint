@@ -8,6 +8,7 @@ import {
   newId,
   normalizePeerSupportEventDate,
   normalizePeerSupportEventTotalMinutes,
+  normalizePeerSupportHelpTypeSelection,
   normalizePrpsBureau,
   normalizePrpsGender,
   normalizeWorkRelatedIncident,
@@ -86,9 +87,9 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
   if (!prpsGender) return json({ error: 'Select a valid gender for the person receiving peer support.' }, 400, origin);
 
   const helpTypes = await loadPeerSupportHelpTypes(env);
-  const helpType = String(body.helpType ?? '').trim();
-  if (!helpType || !helpTypes.includes(helpType)) {
-    return json({ error: 'Select a valid Resources / Referrals option.' }, 400, origin);
+  const helpType = normalizePeerSupportHelpTypeSelection(body, helpTypes);
+  if (!helpType) {
+    return json({ error: 'Select at least one valid Resources / Referrals option.' }, 400, origin);
   }
 
   const workRelatedIncident = normalizeWorkRelatedIncident(body.workRelatedIncident);

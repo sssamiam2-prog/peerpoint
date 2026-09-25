@@ -2358,6 +2358,82 @@ a.crisis-modal__call-btn {
   letter-spacing: 0.02em;
 }
 
+.event-logger-form__field--checklist {
+  border: none;
+  padding: 0;
+  min-width: 0;
+}
+
+.event-logger-form__field--checklist legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #5c6b66);
+}
+
+.event-logger-form__field--checklist legend span {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.875rem;
+  color: var(--text);
+}
+
+.event-logger-form__option-list {
+  display: grid;
+  gap: 10px;
+}
+
+.event-logger-form__option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 3.25rem;
+  margin: 0;
+  padding: 12px 16px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 1.0625rem;
+  font-weight: 500;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-h);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.event-logger-form__option:hover {
+  border-color: rgba(15, 106, 74, 0.35);
+}
+
+.event-logger-form__option.is-selected,
+.event-logger-form__option:has(input:checked) {
+  border-color: var(--primary, #0f6a4a);
+  background: var(--primary-soft, rgba(15, 106, 74, 0.12));
+  box-shadow: 0 0 0 1px rgba(15, 106, 74, 0.08);
+}
+
+.event-logger-form__option input {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  accent-color: var(--primary, #0f6a4a);
+  cursor: pointer;
+}
+
+.event-logger-form__option span {
+  flex: 1;
+}
+
 .event-logger-form__submit {
   margin-top: 4px;
   min-height: 3.25rem;
