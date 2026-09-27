@@ -1,0 +1,31 @@
+# Scheduled HTTP checks for production PEERPoint (mypeerpoint.com).
+# Watch this repo (GitHub → Watch → Custom → Actions) to get email on failure.
+
+name: Mypeerpoint health
+
+on:
+  schedule:
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Member site
+        run: |
+          code=$(curl -sS -o /tmp/home.html -w "%{http_code}" --max-time 45 https://mypeerpoint.com/)
+          test "$code" = "200"
+          grep -qi peerpoint /tmp/home.html
+
+      - name: Staff sign-in
+        run: |
+          code=$(curl -sS -o /tmp/staff.html -w "%{http_code}" --max-time 45 https://mypeerpoint.com/staff)
+          test "$code" = "200"
+          grep -qi peerpoint /tmp/staff.html
+
+      - name: Admin site
+        run: |
+          code=$(curl -sS -o /tmp/admin.html -w "%{http_code}" --max-time 45 https://admin.mypeerpoint.com/)
+          test "$code" = "200"
+          grep -qi peerpoint /tmp/admin.html
