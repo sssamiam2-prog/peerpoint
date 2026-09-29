@@ -38,6 +38,16 @@ export type Env = {
    * Falls back to CRON_SECRET when unset.
    */
   PEERPOINT_INTEGRATION_SECRET?: string;
+  /**
+   * Initial password for the built-in `admin` account (created only when missing).
+   * Set as a Pages / wrangler secret — never commit the value.
+   */
+  SEED_ADMIN_PASSWORD?: string;
+  /**
+   * Initial password for the built-in `admn` global admin (created only when missing).
+   * Set as a Pages / wrangler secret — never commit the value.
+   */
+  SEED_GLOBAL_ADMIN_PASSWORD?: string;
 };
 
 export type HelpRequest = {

@@ -19,11 +19,9 @@ const PBKDF2_ITERATIONS = 100_000;
 const MIN_PASSWORD_LENGTH = 8;
 
 export const SEED_ADMIN_USERNAME = 'admin';
-export const SEED_ADMIN_PASSWORD = 'PeersStandWithYou2026!';
 
 /** Global admin (master control; not used for On Call / peer matching). Login: Admn (stored as admn). */
 export const SEED_GLOBAL_ADMIN_USERNAME = 'admn';
-export const SEED_GLOBAL_ADMIN_PASSWORD = 'thisispeersupport';
 
 const MASTER_ADMIN_USERNAMES = new Set([SEED_ADMIN_USERNAME, SEED_GLOBAL_ADMIN_USERNAME]);
 
@@ -363,6 +361,7 @@ async function ensureMasterAdminAccount(
   const normalized = normalizeUsername(username);
   const users = await loadUsers(env);
   if (users.some(u => u.username === normalized)) return;
+  if (password.trim().length < MIN_PASSWORD_LENGTH) return;
   const { hash, salt } = await hashPassword(password);
   users.push({
     username: normalized,
@@ -377,30 +376,42 @@ async function ensureMasterAdminAccount(
     salt,
     active: true,
     setupComplete: true,
+    mustChangePassword: true,
     emailVerifiedAt: new Date().toISOString(),
     createdAt: new Date().toISOString()
   });
   await saveUsers(env, users);
 }
 
-/** Idempotent: ensure built-in Admin accounts exist with known passwords. */
+/**
+ * Idempotent: ensure built-in Admin accounts exist when seed passwords are configured.
+ * Passwords come from Pages/wrangler secrets (SEED_ADMIN_PASSWORD, SEED_GLOBAL_ADMIN_PASSWORD).
+ * Existing accounts are never overwritten — rotate compromised passwords in Admin UI / KV.
+ */
 export async function ensureSeedAdmin(env: Env): Promise<void> {
-  await ensureMasterAdminAccount(env, SEED_ADMIN_USERNAME, SEED_ADMIN_PASSWORD, {
-    firstName: 'Admin',
-    lastName: '',
-    bureau: 'PEER Support',
-    jobTitle: 'Administrator',
-    email: 'admin@mypeerpoint.com',
-    displayName: 'Admin'
-  });
-  await ensureMasterAdminAccount(env, SEED_GLOBAL_ADMIN_USERNAME, SEED_GLOBAL_ADMIN_PASSWORD, {
-    firstName: 'Global',
-    lastName: 'Admin',
-    bureau: 'PEER Support',
-    jobTitle: 'Global Administrator',
-    email: 'admn@mypeerpoint.com',
-    displayName: 'Global Admin'
-  });
+  const adminPassword = (env.SEED_ADMIN_PASSWORD ?? '').trim();
+  if (adminPassword) {
+    await ensureMasterAdminAccount(env, SEED_ADMIN_USERNAME, adminPassword, {
+      firstName: 'Admin',
+      lastName: '',
+      bureau: 'PEER Support',
+      jobTitle: 'Administrator',
+      email: 'admin@mypeerpoint.com',
+      displayName: 'Admin'
+    });
+  }
+
+  const globalPassword = (env.SEED_GLOBAL_ADMIN_PASSWORD ?? '').trim();
+  if (globalPassword) {
+    await ensureMasterAdminAccount(env, SEED_GLOBAL_ADMIN_USERNAME, globalPassword, {
+      firstName: 'Global',
+      lastName: 'Admin',
+      bureau: 'PEER Support',
+      jobTitle: 'Global Administrator',
+      email: 'admn@mypeerpoint.com',
+      displayName: 'Global Admin'
+    });
+  }
 }
 
 export function toPublicAccount(u: StaffUser): PublicStaffAccount {

@@ -37,3 +37,5 @@ Or copy changes back to the SPFx folder before `git commit` / `git push` if that
 ## Docs index
 
 See [docs/dev-and-preview.md](./docs/dev-and-preview.md) for CI, Cloudflare, and domains.
+
+**Repository visibility:** keep the GitHub repo **private** — [docs/repo-visibility.md](./docs/repo-visibility.md).

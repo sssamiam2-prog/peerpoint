@@ -10,14 +10,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const MEMBER_BASE = 'https://mypeerpoint.com';
-const ADMIN_BASE = 'https://admin.mypeerpoint.com';
-const SITE_CODE = 'slcoso';
-const STAFF_EMAIL = 'ssmith@saltlakecounty.gov';
-const STAFF_TEMP = 'ssmith1234';
-const STAFF_NEW_PW = 'SsmithDemo2026!';
-const ADMIN_USER = 'admin';
-const ADMIN_PW = 'PeersStandWithYou2026!';
+const MEMBER_BASE = process.env.PEERPOINT_MEMBER_BASE || 'https://mypeerpoint.com';
+const ADMIN_BASE = process.env.PEERPOINT_ADMIN_BASE || 'https://admin.mypeerpoint.com';
+const SITE_CODE = process.env.PEERPOINT_SITE_CODE || 'slcoso';
+const STAFF_EMAIL = process.env.PEERPOINT_STAFF_EMAIL || '';
+const STAFF_TEMP = process.env.PEERPOINT_STAFF_TEMP || '';
+const STAFF_NEW_PW = process.env.PEERPOINT_STAFF_NEW_PW || '';
+const ADMIN_USER = process.env.PEERPOINT_ADMIN_USER || 'admin';
+const ADMIN_PW = process.env.SEED_ADMIN_PASSWORD || process.env.PEERPOINT_ADMIN_PASSWORD || '';
+
+if (!ADMIN_PW || !STAFF_EMAIL || !STAFF_TEMP || !STAFF_NEW_PW) {
+  console.error(
+    'Set SEED_ADMIN_PASSWORD (or PEERPOINT_ADMIN_PASSWORD), PEERPOINT_STAFF_EMAIL, PEERPOINT_STAFF_TEMP, and PEERPOINT_STAFF_NEW_PW before running.'
+  );
+  process.exit(1);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(__dirname, '../../../docs/training/screenshots');
