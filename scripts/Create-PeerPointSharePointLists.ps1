@@ -187,6 +187,7 @@ Ensure-FieldIndexed -ListTitle 'PeerSupportEvents' -InternalName 'ProviderDispla
 Ensure-FieldIndexed -ListTitle 'PeerSupportEvents' -InternalName 'HelpType'
 Ensure-FieldIndexed -ListTitle 'PeerSupportEvents' -InternalName 'EventDate'
 Write-Host "  MSE search UI: sharepoint/mse-logged-events-app → Site Assets (see docs/mse-logged-events-app.md)" -ForegroundColor Yellow
+Write-Host "  Then lock down: Set-PeerSupportEventsListPermissions.ps1 -RestrictLoggedEventsPage" -ForegroundColor Yellow
 
 Write-Host "`n=== AuditLog ===" -ForegroundColor Cyan
 Ensure-GenericList -Title 'AuditLog' | Out-Null

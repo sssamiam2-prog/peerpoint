@@ -27,7 +27,9 @@ cd scripts
 
 Creates or updates **PeerSupportEvents** (including **Event Date (sortable)** `EventDateValue` and indexed search columns).
 
-Restrict the list to **site owners / program admins** (break inheritance) if events are sensitive.
+Restrict the list and search page to **site owners** + SharePoint group **`PeerSupport_Admins`**:
+`scripts/Set-PeerSupportEventsListPermissions.ps1 -RestrictLoggedEventsPage` (see [peer-support-events-sharepoint-sync.md](./peer-support-events-sharepoint-sync.md)).
+The MSE app uses the viewer’s SharePoint session—others get no rows / access denied.
 
 ### 2. Upload the MSE app and embed on the site page
 

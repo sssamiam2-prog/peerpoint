@@ -7,7 +7,8 @@ Staff record events in the PEERPoint PWA (**Staff → Event Logger**). Site owne
 ## One-time setup
 
 1. Run `scripts/Create-PeerPointSharePointLists.ps1 -SiteUrl "https://slcounty.sharepoint.com/sites/SH-PS"` (creates **PeerSupportEvents**).
-2. Restrict the list to site owners (break inheritance; owners = Full Control).
+2. Restrict the list to **site owners** + **`PeerSupport_Admins`** only:
+   `pwsh -File scripts/Set-PeerSupportEventsListPermissions.ps1 -SiteUrl "https://slcounty.sharepoint.com/sites/SH-PS" -RestrictLoggedEventsPage`
 3. On Cloudflare Pages, set secret **`PEERPOINT_INTEGRATION_SECRET`** (long random string). Power Automate uses this as a Bearer token.
 
 ## Integration API
