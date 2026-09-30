@@ -9,7 +9,8 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$AssetBaseUrl,
-  [string]$OutFile
+  [string]$OutFile,
+  [switch]$UseExternalScript
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,14 +36,24 @@ $css = Get-Content -Path $cssPath -Raw -Encoding UTF8
 $js = Get-Content -Path $jsPath -Raw -Encoding UTF8
 $js = $js -replace '</script>', '<\/script>'
 
+$assetBase = $AssetBaseUrl.TrimEnd('/')
+$scriptTag = if ($UseExternalScript) {
+  $v = Get-Date -Format 'yyyyMMddHHmmss'
+  "<script src=""$assetBase/app.js?v=$v""></script>"
+} else {
+  @"
+<script>
+$js
+</script>
+"@
+}
+
 $snippet = @"
 <style>
 $css
 </style>
 $body
-<script>
-$js
-</script>
+$scriptTag
 "@
 
 if ($OutFile) {

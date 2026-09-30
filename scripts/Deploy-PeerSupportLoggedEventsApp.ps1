@@ -86,9 +86,8 @@ Write-Host "Note: opening index.html from a library usually downloads; embed inl
 
 function Get-PeerPointMseInlineMarkup {
   param([string]$BaseUrl)
-  $null = $BaseUrl
   $snippetPath = Join-Path $env:TEMP "PeerPoint-MseInline-$([guid]::NewGuid().ToString('n')).html"
-  & (Join-Path $PSScriptRoot 'Export-MseInlineSnippet.ps1') -AssetBaseUrl 'https://placeholder' -OutFile $snippetPath | Out-Null
+  & (Join-Path $PSScriptRoot 'Export-MseInlineSnippet.ps1') -AssetBaseUrl $BaseUrl -OutFile $snippetPath -UseExternalScript | Out-Null
   try {
     return Get-Content -Path $snippetPath -Raw -Encoding UTF8
   } finally {

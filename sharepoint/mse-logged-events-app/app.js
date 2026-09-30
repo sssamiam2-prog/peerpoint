@@ -283,9 +283,30 @@
     void reloadList();
   }
 
+  /** Content Embed injects markup after DOMContentLoaded; wait for our controls. */
+  function bootWhenReady(attempt) {
+    if (document.getElementById('btnReload') && document.getElementById('resultsBody')) {
+      try {
+        boot();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    if (attempt > 200) {
+      setError('Search UI did not initialize. Republish the Logged Events page or contact support.');
+      return;
+    }
+    window.setTimeout(function () {
+      bootWhenReady(attempt + 1);
+    }, 50);
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
+    document.addEventListener('DOMContentLoaded', function () {
+      bootWhenReady(0);
+    });
   } else {
-    boot();
+    bootWhenReady(0);
   }
 })();
