@@ -1,12 +1,14 @@
 import {
   sendEmailVerificationEmail,
-  sendInviteEmail
+  sendInviteEmail,
+  sendPasswordResetEmail
 } from '../../_lib/email';
 import { corsHeaders, json, type Env } from '../../_lib/store';
 import {
   accountVerifyEmailUrl,
   createAccountEmailVerify,
   createInvite,
+  createPasswordReset,
   deleteInvite,
   displayNameFor,
   getInvite,
@@ -16,6 +18,7 @@ import {
   loadUsers,
   normalizeEmail,
   normalizeUsername,
+  passwordResetUrl,
   primaryContactEmail,
   requireAdmin,
   saveUsers,
@@ -25,6 +28,7 @@ import {
   hashPassword,
   isSeedAdminUsername,
   type StaffRole,
+  type StaffUser,
   validateUsername
 } from '../../_lib/staffAuth';
 import { toE164Phone } from '../../_lib/sms';
@@ -32,6 +36,32 @@ import { startTwilioVerifyAndEmail } from '../../_lib/twilioVerifyNotify';
 import { isOutgoingCallerIdVerified } from '../../_lib/twilioCallerId';
 
 type Ctx = { request: Request; env: Env };
+
+async function emailPasswordResetLink(
+  env: Env,
+  user: StaffUser
+): Promise<{ ok: true; emailed: boolean; emailNote?: string } | { error: string; status: number }> {
+  if (!env.RESEND_API_KEY?.trim() || !env.INVITE_FROM_EMAIL?.trim()) {
+    return {
+      error: 'Password reset email is not configured (RESEND_API_KEY / INVITE_FROM_EMAIL).',
+      status: 503
+    };
+  }
+  const created = await createPasswordReset(env, user);
+  if ('error' in created) return { error: created.error, status: 400 };
+  const mail = await sendPasswordResetEmail(env, {
+    to: created.email,
+    resetUrl: passwordResetUrl(created.token, created.reset.role),
+    firstName: user.firstName,
+    role: user.role
+  });
+  if (!mail.ok) return { error: mail.error, status: 502 };
+  return {
+    ok: true,
+    emailed: mail.emailed === true,
+    emailNote: mail.emailed ? undefined : 'reason' in mail ? mail.reason : undefined
+  };
+}
 
 function suggestUsername(firstName: string, lastName: string, used: Set<string>): string {
   const base = normalizeUsername(`${firstName}.${lastName}`.replace(/[^a-z0-9._-]+/gi, ''));
@@ -203,12 +233,21 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
         existing.mustChangePassword = true;
       }
       await saveUsers(env, users);
+      let resetMail: Awaited<ReturnType<typeof emailPasswordResetLink>> | undefined;
+      if (body.sendPasswordResetEmail === true && tempPassword) {
+        resetMail = await emailPasswordResetLink(env, existing);
+      }
       return json(
         {
           ok: true,
           reused: true,
           temporaryPassword: tempPassword || undefined,
-          account: toPublicAccount(existing)
+          account: toPublicAccount(existing),
+          passwordResetEmailed:
+            resetMail && 'ok' in resetMail ? resetMail.emailed : undefined,
+          passwordResetEmailNote:
+            resetMail && 'ok' in resetMail ? resetMail.emailNote : undefined,
+          passwordResetError: resetMail && 'error' in resetMail ? resetMail.error : undefined
         },
         200,
         origin
@@ -265,12 +304,23 @@ export async function onRequestPost({ request, env }: Ctx): Promise<Response> {
       }
     }
 
+    const sendReset = body.sendPasswordResetEmail !== false;
+    let resetMail: Awaited<ReturnType<typeof emailPasswordResetLink>> | undefined;
+    if (sendReset) {
+      resetMail = await emailPasswordResetLink(env, created as StaffUser);
+    }
+
     return json(
       {
         ok: true,
         provisioned: true,
         temporaryPassword: tempPassword,
-        account: toPublicAccount(created)
+        account: toPublicAccount(created),
+        passwordResetEmailed:
+          resetMail && 'ok' in resetMail ? resetMail.emailed : undefined,
+        passwordResetEmailNote:
+          resetMail && 'ok' in resetMail ? resetMail.emailNote : undefined,
+        passwordResetError: resetMail && 'error' in resetMail ? resetMail.error : undefined
       },
       201,
       origin
@@ -396,7 +446,8 @@ async function createAndEmailInvite(
 /**
  * PATCH /api/staff/accounts
  * Pending invite: { inviteToken, resend|revoke|retriggerTwilio }
- * Account: active/role/sex/leader/phones/temporaryPassword
+ * Account: active/role/sex/leader/phones/temporaryPassword, profile fields (firstName, …)
+ * Account: { username, sendPasswordReset: true } or sendPasswordResetEmail after temp password
  * Account verify: { username, resendEmailVerification: true }
  * Account Twilio: { username, retriggerTwilioVerify: true }
  */
@@ -528,6 +579,28 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     );
   }
 
+  if (body.sendPasswordReset === true) {
+    if (isSeedAdminUsername(user.username)) {
+      return json({ error: 'Use Account settings to change master admin passwords.' }, 400, origin);
+    }
+    const resetMail = await emailPasswordResetLink(env, user);
+    if ('error' in resetMail) {
+      return json({ error: resetMail.error }, resetMail.status, origin);
+    }
+    return json(
+      {
+        ok: true,
+        emailed: resetMail.emailed,
+        emailNote: resetMail.emailNote,
+        message: resetMail.emailed
+          ? 'Password reset email sent.'
+          : resetMail.emailNote ?? 'Reset link could not be emailed — check Resend configuration.'
+      },
+      200,
+      origin
+    );
+  }
+
   if (body.resendEmailVerification === true) {
     if (isSeedAdminUsername(user.username)) {
       return json({ error: 'Master admin accounts do not need email verification.' }, 400, origin);
@@ -613,6 +686,22 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
     user.mustChangePassword = true;
   }
 
+  if (typeof body.firstName === 'string' && body.firstName.trim()) {
+    user.firstName = body.firstName.trim();
+  }
+  if (typeof body.lastName === 'string' && body.lastName.trim()) {
+    user.lastName = body.lastName.trim();
+  }
+  if (typeof body.bureau === 'string' && body.bureau.trim()) {
+    user.bureau = body.bureau.trim();
+  }
+  if (typeof body.jobTitle === 'string' && body.jobTitle.trim()) {
+    user.jobTitle = body.jobTitle.trim();
+  }
+  if (typeof body.currentShift === 'string' && body.currentShift.trim()) {
+    user.currentShift = body.currentShift.trim();
+  }
+
   if (typeof body.email === 'string' && body.email.trim()) {
     const nextEmail = normalizeEmail(body.email);
     const emailErr = validateEmail(nextEmail);
@@ -688,5 +777,31 @@ export async function onRequestPatch({ request, env }: Ctx): Promise<Response> {
 
   users[idx] = user;
   await saveUsers(env, users);
+
+  if (body.sendPasswordResetEmail === true) {
+    const resetMail = await emailPasswordResetLink(env, user);
+    if ('error' in resetMail) {
+      return json(
+        {
+          ok: true,
+          account: toPublicAccount(user),
+          passwordResetError: resetMail.error
+        },
+        200,
+        origin
+      );
+    }
+    return json(
+      {
+        ok: true,
+        account: toPublicAccount(user),
+        passwordResetEmailed: resetMail.emailed,
+        passwordResetEmailNote: resetMail.emailNote
+      },
+      200,
+      origin
+    );
+  }
+
   return json({ ok: true, account: toPublicAccount(user) }, 200, origin);
 }

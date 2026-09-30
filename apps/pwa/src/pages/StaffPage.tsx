@@ -313,6 +313,16 @@ export function StaffPage(): React.ReactElement {
   const [bulkResultSummary, setBulkResultSummary] = React.useState<string | undefined>(undefined);
   const bulkFileRef = React.useRef<HTMLInputElement | null>(null);
   const [lastInviteUrl, setLastInviteUrl] = React.useState<string | undefined>();
+  const [memberEditUsername, setMemberEditUsername] = React.useState<string | null>(null);
+  const [memberEditDraft, setMemberEditDraft] = React.useState({
+    firstName: '',
+    lastName: '',
+    bureau: '',
+    jobTitle: '',
+    email: '',
+    cellPhone: '',
+    workPhone: ''
+  });
   const [activeTab, setActiveTab] = React.useState<WorkspaceTab>(
     isEventLoggerPhaseOnly() ? 'peerEvents' : 'requests'
   );
@@ -1102,6 +1112,80 @@ export function StaffPage(): React.ReactElement {
         title: 'Profile updated',
         message: `Set to ${sex === 'male' ? 'Male' : 'Female'}.`
       };
+    }, toast => toast ?? undefined);
+  };
+
+  const openMemberEdit = (account: PublicAccount): void => {
+    setMemberEditUsername(account.username);
+    setMemberEditDraft({
+      firstName: account.firstName,
+      lastName: account.lastName,
+      bureau: account.bureau,
+      jobTitle: account.jobTitle,
+      email: account.email,
+      cellPhone: account.cellPhone ?? '',
+      workPhone: ''
+    });
+  };
+
+  const closeMemberEdit = (): void => {
+    setMemberEditUsername(null);
+  };
+
+  const onSaveMemberEdit = async (account: PublicAccount): Promise<void> => {
+    setError(undefined);
+    await runAction('Saving member…', async (): Promise<SuccessToast | null> => {
+      const res = await fetch('/api/staff/accounts', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          username: account.username,
+          firstName: memberEditDraft.firstName,
+          lastName: memberEditDraft.lastName,
+          bureau: memberEditDraft.bureau,
+          jobTitle: memberEditDraft.jobTitle,
+          email: memberEditDraft.email,
+          cellPhone: memberEditDraft.cellPhone,
+          workPhone: memberEditDraft.workPhone || memberEditDraft.cellPhone
+        })
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; account?: PublicAccount };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not save member.');
+        return null;
+      }
+      closeMemberEdit();
+      await refreshAccounts();
+      return {
+        title: 'Member updated',
+        message: `${memberEditDraft.firstName} ${memberEditDraft.lastName}`.trim() || account.username
+      };
+    }, toast => toast ?? undefined);
+  };
+
+  const onSendPasswordResetEmail = async (account: PublicAccount): Promise<void> => {
+    setError(undefined);
+    await runAction('Sending password reset…', async (): Promise<SuccessToast | null> => {
+      const res = await fetch('/api/staff/accounts', {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ username: account.username, sendPasswordReset: true })
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        emailed?: boolean;
+        emailNote?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? 'Could not send password reset email.');
+        return null;
+      }
+      const note =
+        data.message ??
+        (data.emailed ? 'Password reset email sent.' : data.emailNote ?? 'Email may not have been delivered.');
+      setInfo(note);
+      return { title: 'Password reset', message: note };
     }, toast => toast ?? undefined);
   };
 
@@ -2838,7 +2922,9 @@ export function StaffPage(): React.ReactElement {
           ) : null}
 
           {(() => {
-            const accountRow = (a: PublicAccount): React.ReactElement => (
+            const accountRow = (a: PublicAccount): React.ReactElement => {
+              const editing = memberEditUsername === a.username;
+              return (
               <li
                 key={a.username}
                 style={{
@@ -2850,10 +2936,11 @@ export function StaffPage(): React.ReactElement {
                   justifyContent: 'space-between',
                   gap: 8,
                   flexWrap: 'wrap',
-                  alignItems: 'center'
+                  alignItems: editing ? 'flex-start' : 'center',
+                  flexDirection: editing ? 'column' : 'row'
                 }}
               >
-                <span>
+                <span style={{ width: editing ? '100%' : undefined }}>
                   <strong>
                     {a.firstName} {a.lastName}
                   </strong>{' '}
@@ -2877,7 +2964,83 @@ export function StaffPage(): React.ReactElement {
                     {a.cellPhone ? ` · ${a.cellPhone}` : ''}
                   </span>
                 </span>
+                {editing ? (
+                  <form
+                    style={{
+                      width: '100%',
+                      display: 'grid',
+                      gap: 8,
+                      maxWidth: 480,
+                      marginTop: 8
+                    }}
+                    onSubmit={e => {
+                      e.preventDefault();
+                      void onSaveMemberEdit(a);
+                    }}
+                  >
+                    <label>
+                      First name
+                      <input
+                        value={memberEditDraft.firstName}
+                        onChange={e => setMemberEditDraft(d => ({ ...d, firstName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Last name
+                      <input
+                        value={memberEditDraft.lastName}
+                        onChange={e => setMemberEditDraft(d => ({ ...d, lastName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Bureau
+                      <input
+                        value={memberEditDraft.bureau}
+                        onChange={e => setMemberEditDraft(d => ({ ...d, bureau: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Job title
+                      <input
+                        value={memberEditDraft.jobTitle}
+                        onChange={e => setMemberEditDraft(d => ({ ...d, jobTitle: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Email
+                      <input
+                        type="email"
+                        value={memberEditDraft.email}
+                        onChange={e => setMemberEditDraft(d => ({ ...d, email: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Cell phone
+                      <input
+                        type="tel"
+                        value={memberEditDraft.cellPhone}
+                        onChange={e => setMemberEditDraft(d => ({ ...d, cellPhone: e.target.value }))}
+                      />
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button type="submit">Save changes</button>
+                      <button type="button" className="btn-ghost" onClick={closeMemberEdit}>
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
                 <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {!isMasterAdminUsername(a.username) ? (
+                    <button type="button" className="btn-ghost" onClick={() => openMemberEdit(a)}>
+                      Edit
+                    </button>
+                  ) : null}
+                  {!isMasterAdminUsername(a.username) ? (
+                    <button type="button" className="btn-ghost" onClick={() => void onSendPasswordResetEmail(a)}>
+                      Send password reset
+                    </button>
+                  ) : null}
                   {!isMasterAdminUsername(a.username) ? (
                     <button type="button" className="btn-ghost" onClick={() => void onResendAccountEmailVerify(a)}>
                       Resend email verify
@@ -2936,6 +3099,7 @@ export function StaffPage(): React.ReactElement {
                 </span>
               </li>
             );
+            };
 
             return (
               <>

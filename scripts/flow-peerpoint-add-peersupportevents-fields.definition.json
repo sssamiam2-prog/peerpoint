@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$authentication": { "defaultValue": {}, "type": "SecureObject" },
+    "$connections": { "defaultValue": {}, "type": "Object" }
+  },
+  "triggers": {
+    "manual": {
+      "metadata": {},
+      "type": "Request",
+      "kind": "Http",
+      "inputs": {
+        "method": "POST",
+        "schema": { "type": "object" },
+        "triggerAuthenticationType": "All"
+      }
+    }
+  },
+  "actions": {
+    "For_each_field": {
+      "type": "Foreach",
+      "foreach": "@createArray('<Field Type=''Text'' DisplayName=''PeerPoint Event Id'' Name=''PeerPointEventId'' Required=''TRUE'' StaticName=''PeerPointEventId'' />','<Field Type=''Text'' DisplayName=''Event Date'' Name=''EventDate'' Required=''TRUE'' StaticName=''EventDate'' />','<Field Type=''DateTime'' DisplayName=''Event Date (sortable)'' Name=''EventDateValue'' Format=''DateOnly'' StaticName=''EventDateValue'' />','<Field Type=''Text'' DisplayName=''Recorded At'' Name=''RecordedAt'' Required=''TRUE'' StaticName=''RecordedAt'' />','<Field Type=''Choice'' DisplayName=''PRPS Bureau'' Name=''PrpsBureau'' Required=''TRUE'' StaticName=''PrpsBureau''><CHOICES><CHOICE>Corrections</CHOICE><CHOICE>Public Safety</CHOICE><CHOICE>Law Enforcement</CHOICE><CHOICE>Admin</CHOICE></CHOICES></Field>','<Field Type=''Choice'' DisplayName=''PRPS Gender'' Name=''PrpsGender'' Required=''TRUE'' StaticName=''PrpsGender''><CHOICES><CHOICE>male</CHOICE><CHOICE>female</CHOICE><CHOICE>nonBinary</CHOICE><CHOICE>preferNotToSay</CHOICE><CHOICE>unknown</CHOICE></CHOICES></Field>','<Field Type=''Choice'' DisplayName=''Work Related Incident'' Name=''WorkRelatedIncident'' StaticName=''WorkRelatedIncident''><CHOICES><CHOICE>yes</CHOICE><CHOICE>no</CHOICE></CHOICES></Field>','<Field Type=''Text'' DisplayName=''Resources / Referrals'' Name=''HelpType'' Required=''TRUE'' StaticName=''HelpType'' />','<Field Type=''Text'' DisplayName=''Peer Supporter'' Name=''ProviderDisplayName'' Required=''TRUE'' StaticName=''ProviderDisplayName'' />','<Field Type=''Text'' DisplayName=''Provider Username'' Name=''ProviderUsername'' StaticName=''ProviderUsername'' />','<Field Type=''Number'' DisplayName=''Total Minutes'' Name=''TotalMinutes'' Required=''TRUE'' StaticName=''TotalMinutes'' />','<Field Type=''Text'' DisplayName=''Logged By'' Name=''CreatedByDisplay'' StaticName=''CreatedByDisplay'' />')",
+      "runtimeConfiguration": { "concurrency": { "repetitions": 1 } },
+      "actions": {
+        "Add_field": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+              "connectionName": "shared_sharepointonline",
+              "operationId": "HttpRequest"
+            },
+            "parameters": {
+              "dataset": "https://slcounty.sharepoint.com/sites/SH-PS",
+              "parameters/method": "POST",
+              "parameters/uri": "_api/web/lists/GetByTitle('PeerSupportEvents')/fields/createfieldasxml",
+              "parameters/headers": {
+                "Accept": "application/json;odata=nometadata",
+                "Content-Type": "application/json;odata=nometadata"
+              },
+              "parameters/body": "@{concat('{\"parameters\":{\"SchemaXml\":\"', replace(replace(items('For_each_field'), '\\', '\\\\'), '\"', '\\\"'), '\"}}')}"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        }
+      }
+    },
+    "Respond": {
+      "runAfter": { "For_each_field": ["Succeeded", "Failed"] },
+      "type": "Response",
+      "inputs": { "statusCode": 200, "body": { "ok": true } }
+    }
+  }
+}

@@ -29,19 +29,46 @@ Creates or updates **PeerSupportEvents** (including **Event Date (sortable)** `E
 
 Restrict the list to **site owners / program admins** (break inheritance) if events are sensitive.
 
-### 2. Upload the MSE app
+### 2. Upload the MSE app and embed on the site page
+
+Requires **PowerShell 7** (`pwsh`). Sign in with your **SLCO** account when the browser opens.
 
 ```powershell
+cd scripts
 .\Deploy-PeerSupportLoggedEventsApp.ps1 -SiteUrl "https://slcounty.sharepoint.com/sites/SH-PS"
 ```
 
-### 3. Wire the site page
+Or double-click **`Deploy-PeerSupportLoggedEventsApp.cmd`**.
 
-1. Open **Peer Support Logged Events** (or create the page at the URL above).
-2. **Edit** → add **Embed** web part → URL:
-   `https://slcounty.sharepoint.com/sites/SH-PS/SiteAssets/PeerPoint/LoggedEvents/index.html`
-3. Add **Power Automate** web part → select flow **PEERPoint — Sync Peer Support Events** (see [peer-support-events-power-automate-flow.md](./peer-support-events-power-automate-flow.md)).
-4. **Publish**.
+The script uploads `index.html`, `app.css`, and `app.js` to  
+`SiteAssets/PeerPoint/LoggedEvents/`, then wires the **Peer-Support-Logged-Events** page with **inline** markup (body + links to `app.css` / `app.js`).
+
+**Do not** open or iframe `index.html` from Site Assets — SharePoint Online treats library HTML as a **download**, not a page.
+
+**Fix (Modern Script Editor on the site page):**
+
+1. **Edit** the page → select the Script Editor web part → **Edit markup**.
+2. Replace all HTML with the contents of `sharepoint/mse-logged-events-app/mse-inline.generated.html` (regenerate with `scripts/Export-MseInlineSnippet.ps1 -AssetBaseUrl "https://…/SiteAssets/PeerPoint/LoggedEvents" -OutFile …`).
+3. Leave **Enable classic _spPageContextInfo** on → **Save** the markup, then **Save** / republish the page.
+
+The generated snippet **inlines CSS and JavaScript** — Modern Script Editor strips external `<link>` / `<script src>` tags, so linked Site Assets styles/scripts will not apply.
+
+### List missing or empty
+
+The UI reads **`PeerSupportEvents`** on SH-PS. If the list does not exist yet:
+
+```powershell
+cd scripts
+.\Create-PeerPointSharePointLists.ps1 -SiteUrl "https://slcounty.sharepoint.com/sites/SH-PS"
+```
+
+Then run the **PEERPoint — Sync Peer Support Events** Power Automate flow (see [peer-support-events-power-automate-flow.md](./peer-support-events-power-automate-flow.md)).
+
+Use `-SkipPageWire` to upload files only. GCC tenants may need a one-time Entra app for PnP; set `PEERPOINT_PNP_CLIENT_ID` if IT gave you one.
+
+### 3. Optional — Power Automate on the same page
+
+**Edit** the page → add **Power Automate** → flow **PEERPoint — Sync Peer Support Events** (see [peer-support-events-power-automate-flow.md](./peer-support-events-power-automate-flow.md)) → **Publish**.
 
 ### 4. Cloudflare secret
 

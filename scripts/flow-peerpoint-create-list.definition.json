@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$authentication": { "defaultValue": {}, "type": "SecureObject" },
+    "$connections": { "defaultValue": {}, "type": "Object" }
+  },
+  "triggers": {
+    "manual": {
+      "metadata": {},
+      "type": "Request",
+      "kind": "Http",
+      "inputs": {
+        "method": "POST",
+        "schema": { "type": "object" },
+        "triggerAuthenticationType": "All"
+      }
+    }
+  },
+  "actions": {
+    "Create_list": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+          "connectionName": "shared_sharepointonline",
+          "operationId": "HttpRequest"
+        },
+        "parameters": {
+          "dataset": "https://slcounty.sharepoint.com/sites/SH-PS",
+          "parameters/method": "POST",
+          "parameters/uri": "_api/web/lists",
+          "parameters/headers": {
+            "Accept": "application/json;odata=nometadata",
+            "Content-Type": "application/json;odata=nometadata"
+          },
+          "parameters/body": "{\"Title\":\"PeerSupportEvents\",\"Description\":\"PEERPoint staff event logger (Power Automate sync)\",\"BaseTemplate\":100}"
+        },
+        "authentication": "@parameters('$authentication')"
+      }
+    },
+    "Respond": {
+      "runAfter": { "Create_list": ["Succeeded", "Failed"] },
+      "type": "Response",
+      "inputs": { "statusCode": 200, "body": "@body('Create_list')" }
+    }
+  }
+}

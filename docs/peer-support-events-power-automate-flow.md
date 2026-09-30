@@ -1,8 +1,14 @@
 # Power Automate — Sync Peer Support Events to SharePoint
 
-Flow name (recommended): **PEERPoint — Sync Peer Support Events**
+Flow names (GCC default environment):
 
-**Trigger:** Manually trigger a cloud flow (button on the [Logged Events page](./mse-logged-events-app.md))
+| Flow | Trigger | Purpose |
+|------|---------|---------|
+| **PEERPoint — Sync Peer Support Events** | Manual (button) | Pin on [Logged Events page](./mse-logged-events-app.md) |
+| **PEERPoint — Sync Peer Support Events (every 15 min)** | Recurrence | Automatic sync (optional) |
+| **PEERPoint — Create PeerSupportEvents list SH-PS** | HTTP (one-time) | Creates empty list if missing |
+
+**Trigger (primary):** Manually trigger a cloud flow (button on the Logged Events page)
 
 **Environment:** Salt Lake County GCC (same tenant as SH-PS)
 

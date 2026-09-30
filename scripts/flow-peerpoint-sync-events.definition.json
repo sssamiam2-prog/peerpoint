@@ -1,0 +1,312 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$authentication": {
+      "defaultValue": {},
+      "type": "SecureObject"
+    },
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object"
+    }
+  },
+  "triggers": {
+    "manual": {
+      "metadata": {},
+      "type": "Request",
+      "kind": "Button",
+      "inputs": {
+        "schema": {}
+      }
+    }
+  },
+  "actions": {
+    "Get_PeerSupportEvents_list": {
+      "runAfter": {},
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+          "connectionName": "shared_sharepointonline",
+          "operationId": "HttpRequest"
+        },
+        "parameters": {
+          "dataset": "https://slcounty.sharepoint.com/sites/SH-PS",
+          "parameters/method": "GET",
+          "parameters/uri": "_api/web/lists/getbytitle('PeerSupportEvents')?$select=Id,Title",
+          "parameters/headers": {
+            "Accept": "application/json;odata=nometadata"
+          }
+        },
+        "authentication": "@parameters('$authentication')"
+      }
+    },
+    "HTTP_GET_events": {
+      "runAfter": {
+        "Get_PeerSupportEvents_list": [
+          "Succeeded"
+        ]
+      },
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "https://mypeerpoint.com/api/integrations/peer-support-events?pendingOnly=1&limit=2000",
+        "headers": {
+          "Authorization": "Bearer __PEERPOINT_INTEGRATION_SECRET__"
+        }
+      }
+    },
+    "Parse_events": {
+      "runAfter": {
+        "HTTP_GET_events": [
+          "Succeeded"
+        ]
+      },
+      "type": "ParseJson",
+      "inputs": {
+        "content": "@body('HTTP_GET_events')",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "eventDate": {
+                    "type": "string"
+                  },
+                  "recordedAt": {
+                    "type": "string"
+                  },
+                  "prpsBureau": {
+                    "type": "string"
+                  },
+                  "prpsGender": {
+                    "type": "string"
+                  },
+                  "workRelatedIncident": {
+                    "type": "string"
+                  },
+                  "helpType": {
+                    "type": "string"
+                  },
+                  "providerDisplayName": {
+                    "type": "string"
+                  },
+                  "providerUsername": {
+                    "type": "string"
+                  },
+                  "totalMinutes": {
+                    "type": "number"
+                  },
+                  "createdByDisplay": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Init_syncedIds": {
+      "runAfter": {
+        "Parse_events": [
+          "Succeeded"
+        ]
+      },
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "syncedIds",
+            "type": "Array",
+            "value": []
+          }
+        ]
+      }
+    },
+    "For_each_event": {
+      "runAfter": {
+        "Init_syncedIds": [
+          "Succeeded"
+        ]
+      },
+      "type": "Foreach",
+      "foreach": "@coalesce(body('Parse_events')?['events'], json('[]'))",
+      "runtimeConfiguration": {
+        "concurrency": {
+          "repetitions": 1
+        }
+      },
+      "actions": {
+        "Get_existing": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+              "connectionName": "shared_sharepointonline",
+              "operationId": "GetItems"
+            },
+            "parameters": {
+              "dataset": "https://slcounty.sharepoint.com/sites/SH-PS",
+              "table": "@body('Get_PeerSupportEvents_list')?['Id']",
+              "$filter": "PeerPoint_x0020_Event_x0020_Id0 eq '@{replace(string(items('For_each_event')?['id']), '''', '''''')}'",
+              "$top": 1
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Create_or_update": {
+          "runAfter": {
+            "Get_existing": [
+              "Succeeded"
+            ]
+          },
+          "type": "If",
+          "expression": {
+            "equals": [
+              "@length(coalesce(body('Get_existing')?['value'], json('[]')))",
+              0
+            ]
+          },
+          "actions": {
+            "Create_item": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "connectionName": "shared_sharepointonline",
+                  "operationId": "PostItem"
+                },
+                "parameters": {
+                  "dataset": "https://slcounty.sharepoint.com/sites/SH-PS",
+                  "table": "@body('Get_PeerSupportEvents_list')?['Id']",
+                  "item": {
+                    "Title": "@{concat(items('For_each_event')?['providerDisplayName'], ' — ', items('For_each_event')?['eventDate'])}",
+                    "PeerPoint_x0020_Event_x0020_Id0": "@{items('For_each_event')?['id']}",
+                    "Event_x0020_Date0": "@{items('For_each_event')?['eventDate']}",
+                    "Event_x0020_Date_x0020__x0028_so0": "@{items('For_each_event')?['eventDate']}",
+                    "Recorded_x0020_At0": "@{items('For_each_event')?['recordedAt']}",
+                    "PRPS_x0020_Bureau0": {
+                      "Value": "@{items('For_each_event')?['prpsBureau']}"
+                    },
+                    "PRPS_x0020_Gender0": {
+                      "Value": "@{items('For_each_event')?['prpsGender']}"
+                    },
+                    "Work_x0020_Related_x0020_Inciden0": {
+                      "Value": "@{coalesce(items('For_each_event')?['workRelatedIncident'], 'no')}"
+                    },
+                    "Resources_x0020__x002f__x0020_Re0": "@{items('For_each_event')?['helpType']}",
+                    "Peer_x0020_Supporter0": "@{items('For_each_event')?['providerDisplayName']}",
+                    "Provider_x0020_Username0": "@{coalesce(items('For_each_event')?['providerUsername'], '')}",
+                    "Total_x0020_Minutes0": "@items('For_each_event')?['totalMinutes']",
+                    "Logged_x0020_By0": "@{coalesce(items('For_each_event')?['createdByDisplay'], '')}"
+                  }
+                },
+                "authentication": "@parameters('$authentication')"
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Update_item": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "PatchItem"
+                  },
+                  "parameters": {
+                    "dataset": "https://slcounty.sharepoint.com/sites/SH-PS",
+                    "table": "@body('Get_PeerSupportEvents_list')?['Id']",
+                    "id": "@first(body('Get_existing')?['value'])?['ID']",
+                    "item": {
+                      "Title": "@{concat(items('For_each_event')?['providerDisplayName'], ' — ', items('For_each_event')?['eventDate'])}",
+                      "Event_x0020_Date0": "@{items('For_each_event')?['eventDate']}",
+                      "Event_x0020_Date_x0020__x0028_so0": "@{items('For_each_event')?['eventDate']}",
+                      "Recorded_x0020_At0": "@{items('For_each_event')?['recordedAt']}",
+                      "PRPS_x0020_Bureau0": {
+                        "Value": "@{items('For_each_event')?['prpsBureau']}"
+                      },
+                      "PRPS_x0020_Gender0": {
+                        "Value": "@{items('For_each_event')?['prpsGender']}"
+                      },
+                      "Work_x0020_Related_x0020_Inciden0": {
+                        "Value": "@{coalesce(items('For_each_event')?['workRelatedIncident'], 'no')}"
+                      },
+                      "Resources_x0020__x002f__x0020_Re0": "@{items('For_each_event')?['helpType']}",
+                      "Peer_x0020_Supporter0": "@{items('For_each_event')?['providerDisplayName']}",
+                      "Provider_x0020_Username0": "@{coalesce(items('For_each_event')?['providerUsername'], '')}",
+                      "Total_x0020_Minutes0": "@items('For_each_event')?['totalMinutes']",
+                      "Logged_x0020_By0": "@{coalesce(items('For_each_event')?['createdByDisplay'], '')}"
+                    }
+                  },
+                  "authentication": "@parameters('$authentication')"
+                }
+              }
+            }
+          }
+        },
+        "Append_syncedId": {
+          "runAfter": {
+            "Create_or_update": [
+              "Succeeded"
+            ]
+          },
+          "type": "AppendToArrayVariable",
+          "inputs": {
+            "name": "syncedIds",
+            "value": "@items('For_each_event')?['id']"
+          }
+        }
+      }
+    },
+    "If_any_synced": {
+      "runAfter": {
+        "For_each_event": [
+          "Succeeded",
+          "Failed"
+        ]
+      },
+      "type": "If",
+      "expression": {
+        "greater": [
+          "@length(variables('syncedIds'))",
+          0
+        ]
+      },
+      "actions": {
+        "Compose_post_body": {
+          "type": "Compose",
+          "inputs": {
+            "importedIds": "@variables('syncedIds')"
+          }
+        },
+        "HTTP_POST_imported": {
+          "runAfter": {
+            "Compose_post_body": [
+              "Succeeded"
+            ]
+          },
+          "type": "Http",
+          "inputs": {
+            "method": "POST",
+            "uri": "https://mypeerpoint.com/api/integrations/peer-support-events",
+            "headers": {
+              "Authorization": "Bearer __PEERPOINT_INTEGRATION_SECRET__",
+              "Content-Type": "application/json"
+            },
+            "body": "@outputs('Compose_post_body')"
+          }
+        }
+      }
+    }
+  }
+}

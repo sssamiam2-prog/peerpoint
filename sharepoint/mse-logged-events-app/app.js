@@ -7,31 +7,42 @@
   const SELECT_FIELDS = [
     'Id',
     'Title',
-    'PeerPointEventId',
-    'EventDate',
-    'EventDateValue',
-    'RecordedAt',
-    'PrpsBureau',
-    'PrpsGender',
-    'HelpType',
-    'WorkRelatedIncident',
-    'ProviderDisplayName',
-    'ProviderUsername',
-    'TotalMinutes',
-    'CreatedByDisplay'
+    'PeerPoint_x0020_Event_x0020_Id0',
+    'Event_x0020_Date0',
+    'Event_x0020_Date_x0020__x0028_so0',
+    'Recorded_x0020_At0',
+    'PRPS_x0020_Bureau0',
+    'PRPS_x0020_Gender0',
+    'Resources_x0020__x002f__x0020_Re0',
+    'Work_x0020_Related_x0020_Inciden0',
+    'Peer_x0020_Supporter0',
+    'Provider_x0020_Username0',
+    'Total_x0020_Minutes0',
+    'Logged_x0020_By0'
   ].join(',');
 
   /** @type {Array<Record<string, unknown>>} */
   let cachedItems = [];
 
   function spContext() {
-    const ctx = window._spPageContextInfo || (window.parent && window.parent._spPageContextInfo);
-    if (!ctx || !ctx.webAbsoluteUrl) {
-      throw new Error(
-        'SharePoint page context not found. Embed this app from Site Assets on the SH-PS site (same site as the list).'
-      );
+    const ctx =
+      window._spPageContextInfo ||
+      (window.parent && window.parent._spPageContextInfo) ||
+      (window.top && window.top._spPageContextInfo);
+    if (ctx && ctx.webAbsoluteUrl) return ctx;
+
+    const path = window.location.pathname || '';
+    const siteMatch = path.match(/^(.*\/sites\/[^/]+)/i);
+    if (siteMatch) {
+      return {
+        webAbsoluteUrl: window.location.origin + siteMatch[1],
+        webServerRelativeUrl: siteMatch[1]
+      };
     }
-    return ctx;
+
+    throw new Error(
+      'SharePoint page context not found. Open this on the SH-PS site page and enable classic _spPageContextInfo on the Script Editor web part.'
+    );
   }
 
   function $(id) {
@@ -69,6 +80,38 @@
     return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   }
 
+  /** Map list internal names (incl. duplicate “0” suffix fields) to stable keys. */
+  function normalizeItem(raw) {
+    const it = { ...raw };
+    it.PeerPointEventId =
+      raw.PeerPoint_x0020_Event_x0020_Id0 ??
+      raw.PeerPointEventId ??
+      raw.PeerPoint_x0020_Event_x0020_Id;
+    it.EventDate = raw.Event_x0020_Date0 ?? raw.EventDate ?? raw.Event_x0020_Date;
+    it.EventDateValue =
+      raw.Event_x0020_Date_x0020__x0028_so0 ??
+      raw.EventDateValue ??
+      raw['Event_x0020_Date_x0020__x0028_so'];
+    it.RecordedAt = raw.Recorded_x0020_At0 ?? raw.RecordedAt ?? raw.Recorded_x0020_At;
+    it.PrpsBureau = raw.PRPS_x0020_Bureau0 ?? raw.PrpsBureau ?? raw.PRPS_x0020_Bureau;
+    it.PrpsGender = raw.PRPS_x0020_Gender0 ?? raw.PrpsGender ?? raw.PRPS_x0020_Gender;
+    it.HelpType =
+      raw.Resources_x0020__x002f__x0020_Re0 ??
+      raw.HelpType ??
+      raw['Resources_x0020__x002f__x0020_Re'];
+    it.WorkRelatedIncident =
+      raw.Work_x0020_Related_x0020_Inciden0 ??
+      raw.WorkRelatedIncident ??
+      raw.Work_x0020_Related_x0020_Inciden;
+    it.ProviderDisplayName =
+      raw.Peer_x0020_Supporter0 ?? raw.ProviderDisplayName ?? raw.Peer_x0020_Supporter;
+    it.ProviderUsername =
+      raw.Provider_x0020_Username0 ?? raw.ProviderUsername ?? raw.Provider_x0020_Username;
+    it.TotalMinutes = raw.Total_x0020_Minutes0 ?? raw.TotalMinutes ?? raw.Total_x0020_Minutes;
+    it.CreatedByDisplay = raw.Logged_x0020_By0 ?? raw.CreatedByDisplay ?? raw.Logged_x0020_By;
+    return it;
+  }
+
   function itemEventDate(item) {
     if (item.EventDateValue) return String(item.EventDateValue).slice(0, 10);
     if (item.EventDate) return String(item.EventDate).slice(0, 10);
@@ -82,6 +125,11 @@
     });
     if (!resp.ok) {
       const text = await resp.text();
+      if (resp.status === 404 && text.includes('PeerSupportEvents')) {
+        throw new Error(
+          "SharePoint list PeerSupportEvents was not found on this site. Run scripts/Create-PeerPointSharePointLists.ps1 against SH-PS, then sync data with the PEERPoint Power Automate flow."
+        );
+      }
       throw new Error('SharePoint request failed (' + resp.status + '): ' + text.slice(0, 300));
     }
     return resp.json();
@@ -103,12 +151,12 @@
         base +
         '?$select=' +
         SELECT_FIELDS +
-        '&$orderby=EventDateValue desc,RecordedAt desc&$top=' +
+        '&$orderby=Event_x0020_Date_x0020__x0028_so0 desc,Recorded_x0020_At0 desc&$top=' +
         PAGE_SIZE +
         (skip ? '&$skip=' + skip : '');
 
       const json = await fetchJson(url);
-      const batch = json.value || [];
+      const batch = (json.value || []).map(normalizeItem);
       all.push(...batch);
       if (batch.length < PAGE_SIZE) more = false;
       else skip += PAGE_SIZE;
@@ -221,7 +269,7 @@
     runSearch();
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
+  function boot() {
     $('btnSearch').addEventListener('click', runSearch);
     $('btnClear').addEventListener('click', clearFilters);
     $('btnReload').addEventListener('click', function () {
@@ -233,5 +281,11 @@
       });
     });
     void reloadList();
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })();

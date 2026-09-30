@@ -4,24 +4,25 @@ SLCO **PEERPoint** runs at **https://mypeerpoint.com** and **https://admin.mypee
 
 **peerpoint.com** is a different organization’s domain (Allen & Overy / Thirty Three Live). Alerts for `peerpoint.com`, `134.213.15.91`, or `thirtythreelive.co.uk` are **not** for your PWA — remove or disable that monitor.
 
-## Find your current Gmail monitor
+## Daily Gmail alert (Google Apps Script)
 
-In Gmail search (adjust the date range if needed):
+The **“Daily Website Monitor”** messages (from **sssamiam2@gmail.com**, ~8:35 AM MDT) come from this project:
+
+- **Name:** Rosie Website and Email Monitor  
+- **Editor:** [script.google.com – project edit](https://script.google.com/home/projects/1kOZZvRZV0KL8at1whEziHUaQ1p2bE8GCAGi37Sd24KNLKfwrQbwHlHGz/edit)  
+- **Function:** `dailyMonitor` (time trigger 8:00 AM America/Denver)
+
+The `SITES` array in **Code.gs** should use **mypeerpoint.com** (Cloudflare), not **peerpoint.com** (Allen & Overy / Azure DNS). The PEERPoint entry checks `https://mypeerpoint.com/` for **PEERPoint** text plus NS/MX/SPF like the other Cloudflare sites (no fixed www CNAME or Allen & Overy IP).
+
+To test after edits: select **dailyMonitor** → **Run** (authorizes `MailApp` / `UrlFetchApp` if prompted).
+
+## Find old peerpoint.com alerts in Gmail
 
 ```text
 "NEEDS ATTENTION" peerpoint
 ```
 
-Also try:
-
-```text
-"Expected NS record" OR "www connection" OR "Peerpoint (peerpoint.com)"
-```
-
-Open a matching message and note the **From** address and any **footer link** (UptimeRobot, Site24x7, Domain Scan, AlertSite, WarpCheck, a Google Apps Script “Domain Monitor”, etc.). Sign in to that service and:
-
-1. **Delete** or **pause** monitors for **peerpoint.com** / **www.peerpoint.com**.
-2. **Add** monitors for the URLs below (or rely on GitHub Actions + the PowerShell script in this repo).
+Those failures were from the removed **peerpoint.com** block (wrong domain for SLCO). New reports should say **PEERPoint (SLCO) (mypeerpoint.com)**.
 
 ## What to monitor for PEERPoint
 
