@@ -17,5 +17,9 @@ This document captures the operational steps to secure the SharePoint Lists back
 - The app **does not** log request phone/email/description.\n- Audit events are metadata-only (event type, request id, and safe fields like visibility flags).
 
 ## Operational recommendations
-- Turn on **M365 Purview** retention policies for lists as required by policy.\n- Maintain an incident response process for accidental access changes.\n- Periodically review group membership for `PeerSupport_Admins`, `PeerSupport_HR`, and `PeerSupport_PeerSupporters`.
+- Keep the **GitHub repository private** (see [repo-visibility.md](./repo-visibility.md)). Public source previously exposed seed admin passwords in git history.
+- Set Cloudflare Pages secrets `SEED_ADMIN_PASSWORD` and `SEED_GLOBAL_ADMIN_PASSWORD` for bootstrap only; rotate live admin passwords in the app after any exposure.
+- Turn on **M365 Purview** retention policies for lists as required by policy.
+- Maintain an incident response process for accidental access changes.
+- Periodically review group membership for `PeerSupport_Admins`, `PeerSupport_HR`, and `PeerSupport_PeerSupporters`.
 
